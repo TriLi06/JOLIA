@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Suche – DocStoreAI{% endblock %}
+
+{% block content %}
+<h1>🔍 Semantische Suche</h1>
+
+<form id="search-form" onsubmit="doSearch(event)">
+    <div class="grid">
+        <input type="search" id="search-input" name="q" placeholder="Suchbegriff eingeben…" autofocus>
+        <select id="type-filter">
+            <option value="">Alle Typen</option>
+            <option value="documents">Dokumente</option>
+            <option value="images">Bilder</option>
+            <option value="audio">Audio</option>
+            <option value="video">Video</option>
+        </select>
+        <button type="submit">Suchen</button>
+    </div>
+</form>
+
+<div id="search-status"></div>
+<div id="search-results"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function doSearch(event) {
+    event.preventDefault();
+    const q = document.getElementById('search-input').value.trim();
+    const contentType = document.getElementById('type-filter').value;
+    if (!q) return;
+
+    const status = document.getElementById('search-status');
+    const results = document.getElementById('search-results');
+    status.innerHTML = '<p>🔍 Suche läuft…</p>';
+    results.innerHTML = '';
+
+    try {
+        const params = new URLSearchParams({ q, n: 10 });
+        if (contentType) params.set('content_type', contentType);
+        const r = await fetch(`/api/search?${params}`);
+        const data = await r.json();
+
+        if (data.results.length === 0) {
+            status.innerHTML = '<p>Keine Ergebnisse gefunden.</p>';
+            return;
+        }
+
+        status.innerHTML = `<p><strong>${data.results.length}</strong> Ergebnisse für "<em>${escapeHtml(q)}</em>"</p>`;
+
+        const cards = data.results.map(item => {
+            const thumb = item.thumbnail_url
+                ? `<img src="${item.thumbnail_url}" alt="Vorschau" class="search-thumb" loading="lazy">`
+                : '';
+            const summary = item.summary
+                ? `<p class="search-summary"><em>${escapeHtml(item.summary)}</em></p>`
+                : '';
+            return `
+            <article class="search-result-card ${item.content_type === 'images' ? 'search-result-image' : ''}">
+                <header>
+                    ${thumb}
+                    <div class="search-result-header-text">
+                        <strong>${escapeHtml(item.file_name)}</strong>
+                        <span class="badge">${item.content_type}</span>
+                        <span class="score">Score: ${item.score.toFixed(2)}</span>
+                    </div>
+                </header>
+                ${summary}
+                <p class="search-snippet">${escapeHtml(item.text)}</p>
+                <footer>
+                    <small>${escapeHtml(item.source_path)}${item.page ? ' · Seite ' + item.page : ''}</small>
+                    ${item.file_id ? `<a href="/files/${item.file_id}" role="button" class="outline secondary small">📄 Dokument öffnen</a>` : ''}
+                </footer>
+            </article>
+        `}).join('');
+        results.innerHTML = cards;
+
+    } catch(e) {
+        status.innerHTML = `<p class="error">❌ Fehler: ${e.message}</p>`;
+    }
+}
+
+function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.appendChild(document.createTextNode(text || ''));
+    return d.innerHTML;
+}
+
+// URL-Parameter auswerten
+const urlParams = new URLSearchParams(window.location.search);
+const preQ = urlParams.get('q');
+if (preQ) {
+    document.getElementById('search-input').value = preQ;
+    doSearch(new Event('submit'));
+}
+</script>
+{% endblock %}

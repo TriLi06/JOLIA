@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Review: {{ file.original_filename }} – DocStoreAI{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+    <ul>
+        <li><a href="/dashboard">Dashboard</a></li>
+        <li><a href="/review">Review-Warteschlange</a></li>
+        <li>{{ file.original_filename }}</li>
+    </ul>
+</nav>
+
+<h1>✏️ OCR-Review</h1>
+
+<div class="grid">
+    <!-- Datei-Infos & Bild-Vorschau -->
+    <div>
+        <article>
+            <header><strong>{{ file.original_filename }}</strong></header>
+            <table>
+                <tr><th>Typ</th><td>{{ file.content_type }} · {{ file.mime_type }}</td></tr>
+                <tr><th>Status</th><td><span class="status-badge status-{{ file.status }}">{{ file.status }}</span></td></tr>
+                <tr><th>Größe</th><td>{{ "%.1f"|format((file.file_size or 0)/1024) }} KB</td></tr>
+                <tr><th>Importiert</th><td>{{ file.imported_at[:16] if file.imported_at else '–' }}</td></tr>
+                {% if ocr_confidence is not none %}
+                <tr>
+                    <th>OCR-Konfidenz</th>
+                    <td>
+                        <span {% if ocr_confidence < 40 %}style="color:var(--pico-color-red-500)"
+                              {% elif ocr_confidence < 70 %}style="color:var(--pico-color-orange-500)"
+                              {% endif %}>
+                            {{ "%.1f"|format(ocr_confidence) }}%
+                        </span>
+                    </td>
+                </tr>
+                {% endif %}
+            </table>
+
+            {% if file.content_type == 'images' %}
+            <figure>
+                <img src="/api/files/{{ file.id }}/thumbnail" alt="{{ file.original_filename }}"
+                     style="max-width:100%; border-radius:var(--pico-border-radius)"
+                     onerror="this.style.display='none'">
+            </figure>
+            {% endif %}
+
+            <a href="/api/files/{{ file.id }}/download" role="button" class="outline secondary" style="margin-top:0.5rem">
+                ⬇️ Originaldatei herunterladen
+            </a>
+        </article>
+    </div>
+
+    <!-- OCR-Text-Editor -->
+    <div>
+        <article>
+            <header><strong>✏️ Erkannter Text (bearbeitbar)</strong></header>
+
+            {% if ocr_confidence is not none and ocr_confidence < 70 %}
+            <p>
+                <small>
+                    ⚠️ Die OCR-Konfidenz ist
+                    {% if ocr_confidence < 40 %}
+                        <strong style="color:var(--pico-color-red-500)">sehr niedrig ({{ "%.0f"|format(ocr_confidence) }}%)</strong>.
+                        Bitte den Text sorgfältig prüfen und korrigieren.
+                    {% else %}
+                        <strong style="color:var(--pico-color-orange-500)">niedrig ({{ "%.0f"|format(ocr_confidence) }}%)</strong>.
+                        Bitte auf Fehler prüfen.
+                    {% endif %}
+                </small>
+            </p>
+            {% endif %}
+
+            <label for="review-text">Extrahierter Text:</label>
+            <textarea id="review-text" rows="16" style="width:100%; font-family:monospace; font-size:0.9rem">{{ current_text }}</textarea>
+
+            <div style="display:flex; gap:0.5rem; margin-top:1rem; flex-wrap:wrap">
+                <button id="btn-save" onclick="saveReviewText('{{ file.id }}')">
+                    💾 Speichern &amp; Re-Embedding starten
+                </button>
+                <button onclick="markAsProcessed('{{ file.id }}')" class="outline">
+                    ✅ Als korrekt markieren (ohne Änderung)
+                </button>
+                <a href="/files/{{ file.id }}" role="button" class="outline secondary">
+                    Abbrechen
+                </a>
+            </div>
+
+            <div id="review-result" style="margin-top:1rem"></div>
+        </article>
+
+        <!-- Vorher/Nachher Diff (optional: zeige Original-OCR) -->
+        {% if original_ocr_text and original_ocr_text != current_text %}
+        <article>
+            <details>
+                <summary><strong>📋 Originaler OCR-Text (vor letzter Korrektur)</strong></summary>
+                <pre style="white-space:pre-wrap; font-size:0.85rem; opacity:0.7">{{ original_ocr_text }}</pre>
+            </details>
+        </article>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveReviewText(fileId) {
+    const btn = document.getElementById('btn-save');
+    const result = document.getElementById('review-result');
+    const text = document.getElementById('review-text').value;
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Wird gespeichert…';
+    result.innerHTML = '';
+
+    try {
+        const r = await fetch(`/api/files/${fileId}/review-text`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text })
+        });
+        const data = await r.json();
+        if (r.ok) {
+            result.innerHTML = '<p class="success">✅ Text gespeichert und Embedding neu erstellt. Weiterleitung…</p>';
+            setTimeout(() => { window.location.href = '/review'; }, 2000);
+        } else {
+            result.innerHTML = `<p class="error">❌ Fehler: ${data.detail || JSON.stringify(data)}</p>`;
+        }
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ Netzwerkfehler: ${e.message}</p>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '💾 Speichern & Re-Embedding starten';
+    }
+}
+
+async function markAsProcessed(fileId) {
+    if (!confirm('Datei als korrekt verarbeitet markieren (ohne Textänderung)?')) return;
+    const result = document.getElementById('review-result');
+    result.innerHTML = '<p>⏳ Wird aktualisiert…</p>';
+    try {
+        const r = await fetch(`/api/files/${fileId}/mark-reviewed`, { method: 'PATCH' });
+        const data = await r.json();
+        if (r.ok) {
+            result.innerHTML = '<p class="success">✅ Datei als verarbeitet markiert. Weiterleitung…</p>';
+            setTimeout(() => { window.location.href = '/review'; }, 1500);
+        } else {
+            result.innerHTML = `<p class="error">❌ Fehler: ${data.detail || JSON.stringify(data)}</p>`;
+        }
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ Netzwerkfehler: ${e.message}</p>`;
+    }
+}
+</script>
+{% endblock %}

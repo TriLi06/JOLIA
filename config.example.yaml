@@ -1,0 +1,54 @@
+app:
+  host: "0.0.0.0"
+  port: 8080
+  debug: false
+  app_name: "DocStoreAI"
+  # Phase E: Authentifizierung (deaktiviert = kein Login erforderlich)
+  auth_enabled: false
+  auth_username: "admin"
+  # SHA256-Hash des Passworts generieren:
+  #   python -c "import hashlib; print(hashlib.sha256(b'meinPasswort').hexdigest())"
+  auth_password_hash: ""
+  auth_session_secret: "aendere-diesen-wert-in-produktionsumgebung"
+
+paths:
+  inbox: "/mnt/fritzbox/inbox"
+  archive_root: "/home/docstore/source_documents"
+  data_dir: "/home/docstore/data"
+  temp_dir: "/home/docstore/data/temp"
+  backup_target: "/mnt/external_backup/docstoreai_backup"
+
+models:
+  embedding_model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+  embedding_backend: "sentence-transformers"  # "sentence-transformers" | "ollama"
+  embedding_device: "auto"                    # "auto" | "cpu" | "cuda" | "mps"
+  ollama_base_url: "http://localhost:11434"
+  ollama_model: "qwen2.5:3b"
+  whisper_cpp_binary: ""
+  whisper_model_path: ""
+  ffmpeg_binary: "ffmpeg"
+  # Phase B: OpenCLIP (Bild-Ähnlichkeitssuche)
+  clip_model: "ViT-B-32"
+  clip_pretrained: "openai"
+
+processing:
+  chunk_size: 1000
+  chunk_overlap: 150
+  max_file_size_mb: 2000
+  enable_ocr: true
+  enable_audio_transcription: false
+  enable_video_transcription: false
+  enable_image_ocr: true
+  ocr_languages: "deu+eng"
+  ocr_confidence_threshold: 60
+  video_thumbnail_offset_pct: 10
+  # Phase B: Erweiterte Bild-Features (erfordert optionale Pakete)
+  enable_clip_embeddings: false    # open-clip-torch erforderlich
+  enable_face_detection: false     # face-recognition + scikit-learn erforderlich
+
+watcher:
+  enabled: false
+  scan_interval_seconds: 60
+  # Mindest-Ruhezeit (Sekunden) einer Datei bevor sie importiert wird.
+  # Verhindert, dass Dateien importiert werden, die noch kopiert werden.
+  stability_threshold_seconds: 30

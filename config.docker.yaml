@@ -1,0 +1,55 @@
+# Standard-Konfiguration für den Docker-Betrieb.
+# Wird beim Image-Build nach /app/config.yaml kopiert.
+# Alle Pfade sind containerinterne Pfade; sie werden per docker-compose.yml
+# auf Verzeichnisse unter ~/docstoreai/ auf dem Host gemountet.
+# Normalerweise muss hier NICHTS angepasst werden.
+
+app:
+  host: "0.0.0.0"
+  port: 8080
+  debug: false
+  app_name: "DocStoreAI"
+  auth_enabled: false
+
+paths:
+  inbox: "/data/inbox"
+  archive_root: "/data/source_documents"
+  data_dir: "/data/store"
+  temp_dir: "/data/store/temp"
+  backup_target: "/data/store/backup"
+
+models:
+  embedding_model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+  embedding_backend: "sentence-transformers"
+  embedding_device: "cpu"
+  ollama_base_url: "http://ollama:11434"
+  ollama_model: "qwen2.5:3b"
+  ffmpeg_binary: "ffmpeg"
+  # Audio-/Video-Transkription via openai-whisper (CPU)
+  whisper_python_model: "base"
+  # CLIP-Bildsuche: lokal gebackenes OpenCLIP-Modell (offline)
+  clip_backend: "openclip"
+  clip_model: "ViT-B-32"
+  clip_pretrained: "/app/data/models/ViT-B-32.pt"
+
+processing:
+  chunk_size: 1000
+  chunk_overlap: 150
+  max_file_size_mb: 2000
+  enable_ocr: true
+  enable_image_ocr: true
+  enable_audio_transcription: true
+  enable_video_transcription: true
+  enable_clip_embeddings: true
+  enable_face_detection: true
+  # Nur die ersten N Sekunden transkribieren (0 = ganze Datei) -> schneller auf CPU
+  transcription_sample_seconds: 90
+  ocr_languages: "deu+eng"
+  ocr_confidence_threshold: 60
+
+watcher:
+  # Automatischer Import aus der Inbox aktiviert -> einfach Dateien in
+  # ~/docstoreai/inbox legen, sie werden automatisch verarbeitet.
+  enabled: true
+  scan_interval_seconds: 60
+  stability_threshold_seconds: 30

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Chat – DocStoreAI{% endblock %}
+
+{% block content %}
+<h1>💬 Archiv-Chat</h1>
+<p>Stelle Fragen zu deinen archivierten Dokumenten. Das System antwortet basierend auf dem Archivinhalt.</p>
+
+<div id="chat-messages" class="chat-messages"></div>
+
+<form id="chat-form" onsubmit="sendMessage(event)">
+    <div class="grid">
+        <input type="text" id="chat-input" placeholder="Deine Frage…" autocomplete="off" autofocus>
+        <button type="submit" id="chat-send">Senden</button>
+    </div>
+</form>
+
+<div class="chat-examples">
+    <p><small>Beispielfragen:</small></p>
+    <div class="grid">
+        <button class="outline secondary small" onclick="askExample('Welche Dokumente handeln von Versicherungen?')">
+            Versicherungen
+        </button>
+        <button class="outline secondary small" onclick="askExample('Zeige alle Fotos mit GPS-Daten')">
+            Fotos mit GPS
+        </button>
+        <button class="outline secondary small" onclick="askExample('Was sind die wichtigsten Punkte in meinen Notizen?')">
+            Notizen zusammenfassen
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const chatMessages = document.getElementById('chat-messages');
+
+async function sendMessage(event) {
+    event.preventDefault();
+    const input = document.getElementById('chat-input');
+    const question = input.value.trim();
+    if (!question) return;
+
+    appendMessage('user', question);
+    input.value = '';
+    input.disabled = true;
+    document.getElementById('chat-send').disabled = true;
+
+    const loadingId = appendMessage('assistant', '⏳ Denke nach…', true);
+
+    try {
+        const r = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question, n_context: 6 })
+        });
+        const data = await r.json();
+
+        const sourcesHtml = data.sources.length > 0
+            ? '<div class="sources"><strong>Quellen:</strong> ' +
+              data.sources.map(s => {
+                  const href = s.file_id ? `/files/${s.file_id}` : '/files';
+                  return `<a href="${href}" title="${escapeHtml(s.source_path)}">${escapeHtml(s.file_name)}</a>`;
+              }).join(', ') +
+              '</div>'
+            : '';
+
+        replaceMessage(loadingId, 'assistant', data.answer + sourcesHtml);
+    } catch(e) {
+        replaceMessage(loadingId, 'assistant', `❌ Fehler: ${e.message}`);
+    } finally {
+        input.disabled = false;
+        document.getElementById('chat-send').disabled = false;
+        input.focus();
+    }
+}
+
+function appendMessage(role, text, isLoading = false) {
+    const id = 'msg-' + Date.now();
+    const div = document.createElement('div');
+    div.className = `chat-message chat-${role}`;
+    div.id = id;
+    div.innerHTML = `<div class="bubble">${role === 'user' ? escapeHtml(text) : text}</div>`;
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    return id;
+}
+
+function replaceMessage(id, role, html) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = `<div class="bubble">${html}</div>`;
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function askExample(q) {
+    document.getElementById('chat-input').value = q;
+    sendMessage(new Event('submit'));
+}
+
+function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.appendChild(document.createTextNode(text || ''));
+    return d.innerHTML;
+}
+</script>
+{% endblock %}

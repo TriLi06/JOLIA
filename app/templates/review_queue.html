@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Review-Warteschlange – DocStoreAI{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+    <ul>
+        <li><a href="/dashboard">Dashboard</a></li>
+        <li>Review-Warteschlange</li>
+    </ul>
+</nav>
+
+<h1>✏️ Review-Warteschlange</h1>
+<p>Diese Dateien haben einen niedrigen OCR-Konfidenzwert oder benötigen manuelle Überprüfung.
+   Bitte korrigiere den erkannten Text, damit die Suche verbessert wird.</p>
+
+{% if files %}
+<p><strong>{{ total }} Datei(en) warten auf Überprüfung</strong></p>
+<table>
+    <thead>
+        <tr>
+            <th>Dateiname</th>
+            <th>Typ</th>
+            <th>Konfidenz</th>
+            <th>Importiert</th>
+            <th>Aktionen</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for f in files %}
+        <tr>
+            <td>
+                <a href="/review/{{ f.id }}">{{ f.original_filename }}</a>
+            </td>
+            <td><small>{{ f.content_type or '–' }}</small></td>
+            <td>
+                {% set conf = f.sidecar_json_confidence %}
+                {% if conf is not none %}
+                    <span {% if conf < 40 %}style="color:var(--pico-color-red-500)"{% elif conf < 70 %}style="color:var(--pico-color-orange-500)"{% endif %}>
+                        {{ "%.0f"|format(conf) }}%
+                    </span>
+                {% else %}
+                    <small>–</small>
+                {% endif %}
+            </td>
+            <td><small>{{ f.imported_at[:16] if f.imported_at else '–' }}</small></td>
+            <td>
+                <a href="/review/{{ f.id }}" role="button" class="outline" style="padding:0.25rem 0.75rem">
+                    ✏️ Bearbeiten
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<article>
+    <p>✅ Keine Dateien in der Review-Warteschlange. Alle Dateien wurden erfolgreich verarbeitet.</p>
+</article>
+{% endif %}
+{% endblock %}

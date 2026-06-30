@@ -1,0 +1,15 @@
+# Optionale, schwergewichtige Features (CPU-kompatibel).
+# Werden im Docker-Image zusätzlich zu requirements.txt installiert, um
+# Audio-/Video-Transkription, CLIP-Bildsuche und Gesichtserkennung zu aktivieren.
+
+# Audio-/Video-Transkription
+openai-whisper>=20231117
+
+# CLIP – echte Cross-Modal Bild-/Text-Embeddings
+open-clip-torch>=2.24.0
+
+# Gesichtserkennung (zieht dlib; benötigt cmake + Build-Tools beim Bau)
+face-recognition>=1.3.0
+
+# Clustering für Gesichter (DBSCAN) und Geo-Standorte
+scikit-learn>=1.4.0

@@ -1,0 +1,54 @@
+# DocStoreAI – komplettes Setup mit einem Befehl:
+#
+#     docker compose up -d
+#
+# Danach im Browser öffnen:  http://localhost:8080
+# Dateien zum Verarbeiten in  ~/docstoreai/inbox  legen.
+#
+# Es ist KEINE manuelle Konfiguration nötig. Beim ersten Start werden
+# automatisch das Ollama-LLM (qwen2.5:3b) und das Embedding-Modell geladen
+# (einmaliger Download, danach lokal gecacht).
+
+services:
+  # Lokaler LLM-Server (RAG-Chat, Zusammenfassungen)
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    restart: unless-stopped
+
+  # Einmaliger Job: lädt das Standard-LLM, bevor die App startet
+  ollama-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=ollama:11434
+    entrypoint: ["/bin/sh", "-c", "ollama pull qwen2.5:3b"]
+    restart: "no"
+
+  # Die eigentliche DocStoreAI-Anwendung
+  app:
+    build: .
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    ports:
+      - "8080:8080"
+    volumes:
+      # Host-Verzeichnisse (werden bei Bedarf automatisch angelegt)
+      - ${HOME}/docstoreai/inbox:/data/inbox
+      - ${HOME}/docstoreai/source_documents:/data/source_documents
+      - ${HOME}/docstoreai/data:/data/store
+    restart: unless-stopped
+
+volumes:
+  ollama-models:

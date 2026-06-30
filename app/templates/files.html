@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Dateien – DocStoreAI{% endblock %}
+
+{% block content %}
+<h1>📁 Archivierte Dateien <small>({{ total }})</small></h1>
+
+<div class="grid" style="margin-bottom:1rem">
+    <input type="search" id="filter-input" placeholder="Dateiname filtern…" oninput="filterFiles()">
+    <select id="filter-status" onchange="filterFiles()">
+        <option value="">Alle Status</option>
+        <option value="processed">Verarbeitet</option>
+        <option value="needs_review">Review nötig</option>
+        <option value="failed">Fehlerhaft</option>
+        <option value="processing">In Bearbeitung</option>
+    </select>
+    <select id="filter-type" onchange="filterFiles()">
+        <option value="">Alle Typen</option>
+        <option value="documents">Dokumente</option>
+        <option value="images">Bilder</option>
+        <option value="audio">Audio</option>
+        <option value="video">Video</option>
+    </select>
+</div>
+
+<table id="files-table">
+    <thead>
+        <tr>
+            <th>Dateiname</th>
+            <th>Typ</th>
+            <th>Größe</th>
+            <th>Status</th>
+            <th>Importiert</th>
+            <th>Aktionen</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for f in files %}
+        <tr data-status="{{ f.status }}" data-type="{{ f.content_type or '' }}" data-name="{{ f.original_filename | lower }}">
+            <td><a href="/files/{{ f.id }}">{{ f.original_filename }}</a></td>
+            <td><small>{{ f.content_type or '–' }}</small></td>
+            <td><small>{{ "%.1f" | format((f.file_size or 0) / 1024) }} KB</small></td>
+            <td><span class="status-badge status-{{ f.status }}">{{ f.status }}</span></td>
+            <td><small>{{ f.imported_at[:10] if f.imported_at else '–' }}</small></td>
+            <td>
+                <a href="/files/{{ f.id }}" role="button" class="outline small">Details</a>
+                <button onclick="reprocessFile('{{ f.id }}')" class="outline secondary small">↻</button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if not files %}
+<p>Noch keine Dateien im Archiv. <a href="/dashboard">Inbox importieren →</a></p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterFiles() {
+    const nameFilter = document.getElementById('filter-input').value.toLowerCase();
+    const statusFilter = document.getElementById('filter-status').value;
+    const typeFilter = document.getElementById('filter-type').value;
+
+    document.querySelectorAll('#files-table tbody tr').forEach(row => {
+        const name = row.dataset.name || '';
+        const status = row.dataset.status || '';
+        const type = row.dataset.type || '';
+        const visible =
+            (!nameFilter || name.includes(nameFilter)) &&
+            (!statusFilter || status === statusFilter) &&
+            (!typeFilter || type === typeFilter);
+        row.style.display = visible ? '' : 'none';
+    });
+}
+
+async function reprocessFile(fileId) {
+    if (!confirm('Datei erneut verarbeiten?')) return;
+    try {
+        const r = await fetch(`/api/files/${fileId}/reprocess`, { method: 'POST' });
+        const data = await r.json();
+        showFlash('✅ ' + data.message);
+    } catch(e) {
+        showFlash('❌ Fehler: ' + e.message);
+    }
+}
+
+function showFlash(msg) {
+    const el = document.getElementById('flash-message');
+    el.textContent = msg;
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+</script>
+{% endblock %}

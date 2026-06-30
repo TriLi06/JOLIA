@@ -1,0 +1,22 @@
+[Unit]
+Description=DocStoreAI – Lokale KI-Dokumentenverwaltung
+After=network.target
+
+[Service]
+Type=simple
+User=archive
+Group=archive
+WorkingDirectory=/home/archive/docStoreAI
+EnvironmentFile=/home/archive/docStoreAI/.env
+ExecStart=/home/archive/docStoreAI/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=docstoreai
+
+# Ressourcenlimits (optional anpassen)
+# LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

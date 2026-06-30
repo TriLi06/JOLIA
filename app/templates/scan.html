@@ -1,0 +1,277 @@
+{% extends "base.html" %}
+{% block title %}Scannen – DocStoreAI{% endblock %}
+
+{% block content %}
+<h1>📷 Dokument scannen</h1>
+<p>Nimm Seiten mit der Kamera auf oder lade vorhandene Bilder hoch. Die Seiten werden in die
+Inbox gelegt und automatisch verarbeitet.</p>
+
+<div class="grid scan-actions">
+    <button id="btn-camera-toggle" class="outline" type="button">📷 Live-Kamera</button>
+    <button id="btn-photo" class="outline" type="button">📸 Foto aufnehmen</button>
+    <button id="btn-file-pick" class="outline secondary" type="button">📁 Bilder auswählen</button>
+    <input type="file" id="file-input" accept="image/jpeg,image/png" multiple hidden>
+    <input type="file" id="photo-input" accept="image/*" capture="environment" hidden>
+</div>
+<p id="camera-hint" class="scan-hint" hidden></p>
+
+<div id="camera-area" class="scan-camera" hidden>
+    <video id="camera-video" playsinline autoplay muted></video>
+    <div class="scan-camera-controls">
+        <select id="camera-select" aria-label="Kamera auswählen"></select>
+        <button id="btn-capture" type="button">📸 Seite aufnehmen</button>
+        <button id="btn-camera-stop" class="outline secondary" type="button">Kamera stoppen</button>
+    </div>
+</div>
+
+<canvas id="capture-canvas" hidden></canvas>
+
+<div id="scan-status"></div>
+
+<section id="pages-section" hidden>
+    <header class="scan-pages-header">
+        <h2>Erfasste Seiten (<span id="page-count">0</span>)</h2>
+        <div>
+            <button id="btn-clear" class="outline secondary small" type="button">Alle entfernen</button>
+            <button id="btn-upload" type="button">⬆️ Hochladen &amp; verarbeiten</button>
+        </div>
+    </header>
+    <div id="pages-grid" class="scan-pages-grid"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const ALLOWED_TYPES = ['image/jpeg', 'image/png'];
+    const MAX_SIZE = 30 * 1024 * 1024; // 30 MB
+
+    // State: jede Seite { id, blob, url, name }
+    const pages = [];
+    let pageSeq = 0;
+    let stream = null;
+
+    const els = {
+        cameraToggle: document.getElementById('btn-camera-toggle'),
+        photo: document.getElementById('btn-photo'),
+        photoInput: document.getElementById('photo-input'),
+        filePick: document.getElementById('btn-file-pick'),
+        fileInput: document.getElementById('file-input'),
+        cameraHint: document.getElementById('camera-hint'),
+        cameraArea: document.getElementById('camera-area'),
+        video: document.getElementById('camera-video'),
+        cameraSelect: document.getElementById('camera-select'),
+        capture: document.getElementById('btn-capture'),
+        cameraStop: document.getElementById('btn-camera-stop'),
+        canvas: document.getElementById('capture-canvas'),
+        status: document.getElementById('scan-status'),
+        pagesSection: document.getElementById('pages-section'),
+        pagesGrid: document.getElementById('pages-grid'),
+        pageCount: document.getElementById('page-count'),
+        clear: document.getElementById('btn-clear'),
+        upload: document.getElementById('btn-upload'),
+    };
+
+    // Live-Kamera (getUserMedia) ist nur in sicheren Kontexten verfügbar
+    // (HTTPS oder localhost). Über HTTP im LAN ist sie blockiert.
+    const liveCameraSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    if (!liveCameraSupported) {
+        els.cameraToggle.disabled = true;
+        els.cameraToggle.setAttribute('aria-disabled', 'true');
+        els.cameraHint.hidden = false;
+        els.cameraHint.textContent = window.isSecureContext
+            ? 'Live-Kamera nicht verfügbar (kein Kamerazugriff). Nutze "📸 Foto aufnehmen" oder lade Bilder hoch.'
+            : 'Live-Kamera benötigt HTTPS oder localhost. Über das LAN (http://…) nutze "📸 Foto aufnehmen" – das öffnet die Kamera-App des Geräts.';
+    }
+
+    function setStatus(html, type) {
+        els.status.innerHTML = html ? `<p class="${type || ''}">${html}</p>` : '';
+    }
+
+    function renderPages() {
+        els.pageCount.textContent = pages.length;
+        els.pagesSection.hidden = pages.length === 0;
+        els.pagesGrid.innerHTML = pages.map(p => `
+            <figure class="scan-page-card" data-id="${p.id}">
+                <img src="${p.url}" alt="${escapeHtml(p.name)}">
+                <figcaption>${escapeHtml(p.name)}</figcaption>
+                <button class="scan-page-remove" data-id="${p.id}" title="Entfernen" aria-label="Seite entfernen">✕</button>
+            </figure>
+        `).join('');
+    }
+
+    function addPage(blob, name) {
+        const id = ++pageSeq;
+        const url = URL.createObjectURL(blob);
+        pages.push({ id, blob, url, name });
+        renderPages();
+    }
+
+    function removePage(id) {
+        const idx = pages.findIndex(p => p.id === id);
+        if (idx === -1) return;
+        URL.revokeObjectURL(pages[idx].url);
+        pages.splice(idx, 1);
+        renderPages();
+    }
+
+    function clearPages() {
+        pages.forEach(p => URL.revokeObjectURL(p.url));
+        pages.length = 0;
+        renderPages();
+    }
+
+    // Übernimmt ausgewählte/aufgenommene Dateien in die Seitenliste
+    function ingestFiles(fileList) {
+        const files = Array.from(fileList || []);
+        let skipped = 0;
+        files.forEach(f => {
+            const okType = ALLOWED_TYPES.includes(f.type) || /\.(jpe?g|png)$/i.test(f.name || '');
+            if (!okType || f.size > MAX_SIZE) { skipped++; return; }
+            addPage(f, f.name || `foto_${Date.now()}.jpg`);
+        });
+        if (skipped > 0) {
+            setStatus(`${skipped} Datei(en) übersprungen (nur JPEG/PNG bis 30 MB).`, 'error');
+        } else {
+            setStatus('');
+        }
+    }
+
+    // --- Datei-Auswahl ---
+    els.filePick.addEventListener('click', () => els.fileInput.click());
+    els.fileInput.addEventListener('change', () => {
+        ingestFiles(els.fileInput.files);
+        els.fileInput.value = '';
+    });
+
+    // --- Foto aufnehmen (öffnet auf Mobilgeräten die Kamera-App, auch über HTTP) ---
+    els.photo.addEventListener('click', () => els.photoInput.click());
+    els.photoInput.addEventListener('change', () => {
+        ingestFiles(els.photoInput.files);
+        els.photoInput.value = '';
+    });
+
+    // --- Kamera ---
+    async function listCameras() {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const cams = devices.filter(d => d.kind === 'videoinput');
+            els.cameraSelect.innerHTML = cams.map((c, i) =>
+                `<option value="${c.deviceId}">${escapeHtml(c.label || ('Kamera ' + (i + 1)))}</option>`
+            ).join('');
+            els.cameraSelect.hidden = cams.length <= 1;
+        } catch (e) {
+            els.cameraSelect.hidden = true;
+        }
+    }
+
+    async function startCamera(deviceId) {
+        if (!liveCameraSupported) {
+            setStatus('❌ Live-Kamera nicht verfügbar. Nutze "📸 Foto aufnehmen" oder lade Bilder hoch.', 'error');
+            return;
+        }
+        stopCamera();
+        const constraints = {
+            video: deviceId
+                ? { deviceId: { exact: deviceId } }
+                : { facingMode: { ideal: 'environment' } },
+            audio: false,
+        };
+        try {
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            els.video.srcObject = stream;
+            els.cameraArea.hidden = false;
+            els.cameraToggle.textContent = '📷 Kamera läuft';
+            els.cameraToggle.setAttribute('aria-current', 'true');
+            try { await els.video.play(); } catch (_) { /* Autoplay greift i.d.R. */ }
+            await listCameras();
+            setStatus('');
+        } catch (e) {
+            const hints = {
+                NotAllowedError: 'Kamerazugriff wurde abgelehnt. Bitte im Browser erlauben.',
+                NotFoundError: 'Keine Kamera gefunden.',
+                NotReadableError: 'Kamera wird bereits von einer anderen Anwendung verwendet.',
+                OverconstrainedError: 'Angeforderte Kamera nicht verfügbar.',
+                SecurityError: 'Kamera blockiert (unsicherer Kontext). Über HTTP im LAN "📸 Foto aufnehmen" nutzen.',
+            };
+            const hint = hints[e.name] || (escapeHtml(e.message || String(e)));
+            setStatus('❌ Kamerazugriff fehlgeschlagen: ' + escapeHtml(hint), 'error');
+            stopCamera();
+        }
+    }
+
+    function stopCamera() {
+        if (stream) {
+            stream.getTracks().forEach(t => t.stop());
+            stream = null;
+        }
+        els.video.srcObject = null;
+        els.cameraArea.hidden = true;
+        els.cameraToggle.textContent = '📷 Live-Kamera';
+        els.cameraToggle.removeAttribute('aria-current');
+    }
+
+    els.cameraToggle.addEventListener('click', () => {
+        if (stream) stopCamera(); else startCamera();
+    });
+    els.cameraStop.addEventListener('click', stopCamera);
+    els.cameraSelect.addEventListener('change', () => startCamera(els.cameraSelect.value));
+
+    els.capture.addEventListener('click', () => {
+        const v = els.video;
+        if (!v.videoWidth) { setStatus('Kamera noch nicht bereit…', 'error'); return; }
+        els.canvas.width = v.videoWidth;
+        els.canvas.height = v.videoHeight;
+        const ctx = els.canvas.getContext('2d');
+        ctx.drawImage(v, 0, 0);
+        els.canvas.toBlob(blob => {
+            if (!blob) { setStatus('Aufnahme fehlgeschlagen.', 'error'); return; }
+            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            addPage(blob, `scan_${ts}_${pages.length + 1}.jpg`);
+        }, 'image/jpeg', 0.92);
+    });
+
+    // --- Seiten-Aktionen (Delegation) ---
+    els.pagesGrid.addEventListener('click', e => {
+        const btn = e.target.closest('.scan-page-remove');
+        if (btn) removePage(Number(btn.dataset.id));
+    });
+    els.clear.addEventListener('click', clearPages);
+
+    // --- Upload ---
+    els.upload.addEventListener('click', async () => {
+        if (pages.length === 0) return;
+        els.upload.setAttribute('aria-busy', 'true');
+        els.upload.disabled = true;
+        setStatus('⬆️ Wird hochgeladen…', '');
+
+        const fd = new FormData();
+        pages.forEach(p => fd.append('files', p.blob, p.name));
+
+        try {
+            const r = await fetch('/api/scan/upload', { method: 'POST', body: fd });
+            const data = await r.json();
+            if (!r.ok) {
+                throw new Error(data.detail || ('HTTP ' + r.status));
+            }
+            const errMsg = (data.errors && data.errors.length)
+                ? ` Hinweise: ${data.errors.map(escapeHtml).join('; ')}` : '';
+            setStatus('✅ ' + escapeHtml(data.message || 'Hochgeladen.') + errMsg, 'success');
+            showFlash(`${data.saved.length} Seite(n) zur Verarbeitung eingeplant.`);
+            clearPages();
+        } catch (e) {
+            setStatus('❌ Fehler beim Hochladen: ' + escapeHtml(e.message), 'error');
+        } finally {
+            els.upload.removeAttribute('aria-busy');
+            els.upload.disabled = false;
+        }
+    });
+
+    // Beim Verlassen Kamera & URLs freigeben
+    window.addEventListener('beforeunload', () => {
+        stopCamera();
+        pages.forEach(p => URL.revokeObjectURL(p.url));
+    });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,74 @@
+# DocStoreAI - Python Dependencies
+
+# Web Framework
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+jinja2>=3.1.0
+python-multipart>=0.0.9
+aiofiles>=23.2.0
+
+# Configuration & Validation
+pydantic>=2.7.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+pyyaml>=6.0.0
+
+# Database
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+
+# Vector Database
+chromadb>=0.5.0
+
+# AI / Embeddings
+sentence-transformers>=3.0.0
+
+# HTTP Client (for Ollama)
+httpx>=0.27.0
+
+# Document Processing
+pypdf>=4.0.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+python-pptx>=0.6.23
+pdf2image>=1.17.0
+
+# Image Processing & OCR
+pillow>=10.3.0
+pillow-heif>=0.16.0
+pytesseract>=0.3.13
+
+# Audio Metadata
+mutagen>=1.47.0
+
+# Video/Media Metadata
+pymediainfo>=6.1.0
+
+# File Watching (optional)
+watchdog>=4.0.0
+
+# Extended file format support (Phase A post-MVP)
+beautifulsoup4>=4.12.0
+odfpy>=1.4.0
+
+# Phase E: Authentication session support
+itsdangerous>=2.1.0
+
+# Phase B+C: Advanced image features
+# open-clip-torch: CLIP-based image similarity search
+# face-recognition: requires cmake + build tools (Linux: apt install cmake; Windows: Visual Studio Build Tools)
+#   Windows pre-built dlib wheel: pip install dlib==19.24.6 (ohne Compiler)
+#
+# PyTorch: wird als Abhängigkeit von open-clip-torch mitinstalliert.
+#   Für CPU-only (kein CUDA, ~260 MB statt ~2 GB):
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#   Danach erst: pip install open-clip-torch
+torch>=2.0.0
+open-clip-torch>=2.24.0
+scikit-learn>=1.4.0
+face-recognition>=1.3.0
+
+# Audio/Video-Transkription (Python-Backend, kein externes Binary nötig):
+# Modellgröße in config.yaml: models.whisper_python_model (tiny/base/small/medium/large)
+# Alternativ: externes whisper.cpp-Binary über models.whisper_cpp_binary
+openai-whisper>=20231117

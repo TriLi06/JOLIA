@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen – DocStoreAI{% endblock %}
+
+{% block content %}
+<h1>⚙️ Einstellungen</h1>
+
+<div class="grid">
+    <!-- Pfade -->
+    <article>
+        <h3>📁 Pfade</h3>
+        <table>
+            <tr><th>Inbox</th><td><code>{{ cfg.paths.inbox }}</code></td></tr>
+            <tr><th>Archiv</th><td><code>{{ cfg.paths.archive_root }}</code></td></tr>
+            <tr><th>Daten</th><td><code>{{ cfg.paths.data_dir }}</code></td></tr>
+            <tr><th>Backup</th><td><code>{{ cfg.paths.backup_target }}</code></td></tr>
+        </table>
+    </article>
+
+    <!-- Modelle -->
+    <article>
+        <h3>🤖 Modelle</h3>
+        <table>
+            <tr>
+                <th>Ollama</th>
+                <td>
+                    {% if ollama_available %}
+                    <span style="color:green">✅ Verbunden</span>
+                    {% else %}
+                    <span style="color:red">❌ Nicht erreichbar</span>
+                    {% endif %}
+                    – <code>{{ cfg.models.ollama_base_url }}</code>
+                </td>
+            </tr>
+            <tr><th>LLM-Modell</th><td><code>{{ cfg.models.ollama_model }}</code></td></tr>
+            <tr><th>Embedding</th><td><code>{{ cfg.models.embedding_model }}</code></td></tr>
+            <tr>
+                <th>Whisper</th>
+                <td>{% if cfg.models.whisper_cpp_binary %}<code>{{ cfg.models.whisper_cpp_binary }}</code>{% else %}<em>nicht konfiguriert</em>{% endif %}</td>
+            </tr>
+        </table>
+
+        {% if ollama_models %}
+        <details>
+            <summary>Verfügbare Ollama-Modelle ({{ ollama_models|length }})</summary>
+            <ul>{% for m in ollama_models %}<li><code>{{ m }}</code></li>{% endfor %}</ul>
+        </details>
+        {% endif %}
+    </article>
+</div>
+
+<div class="grid">
+    <!-- Verarbeitung -->
+    <article>
+        <h3>🔧 Verarbeitung</h3>
+        <table>
+            <tr><th>Chunk-Größe</th><td>{{ cfg.processing.chunk_size }}</td></tr>
+            <tr><th>Überlapp</th><td>{{ cfg.processing.chunk_overlap }}</td></tr>
+            <tr><th>OCR aktiviert</th><td>{{ 'Ja' if cfg.processing.enable_ocr else 'Nein' }}</td></tr>
+            <tr><th>Bild-OCR</th><td>{{ 'Ja' if cfg.processing.enable_image_ocr else 'Nein' }}</td></tr>
+            <tr><th>OCR-Sprachen</th><td><code>{{ cfg.processing.ocr_languages }}</code></td></tr>
+            <tr><th>Audio-Transkription</th><td>{{ 'Ja' if cfg.processing.enable_audio_transcription else 'Nein' }}</td></tr>
+            <tr><th>Video-Transkription</th><td>{{ 'Ja' if cfg.processing.enable_video_transcription else 'Nein' }}</td></tr>
+        </table>
+    </article>
+
+    <!-- Index-Metadaten -->
+    <article>
+        <h3>📊 Index-Status</h3>
+        {% if index_meta %}
+        <table>
+            {% for k, v in index_meta.items() %}
+            <tr><th>{{ k }}</th><td><small>{{ v }}</small></td></tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p>Noch kein Index vorhanden. Bitte Inbox importieren oder Reindex starten.</p>
+        {% endif %}
+    </article>
+</div>
+
+<article>
+    <h3>ℹ️ Hinweise</h3>
+    <p>Konfiguration wird über <code>config.yaml</code> und <code>.env</code> verwaltet.
+    Nach Änderungen muss die Anwendung neu gestartet werden.</p>
+    <p><strong>Ollama nicht erreichbar?</strong> Starte Ollama: <code>ollama serve</code></p>
+    <p><strong>Modell herunterladen:</strong> <code>ollama pull {{ cfg.models.ollama_model }}</code></p>
+</article>
+
+{% if cfg.processing.enable_face_detection %}
+<article>
+    <h3>👤 Personen &amp; Gesichter</h3>
+    {% if face_clusters %}
+    <p>
+        <small>Erkannte Personen-Cluster. Klicke auf den Namen um ihn zu bearbeiten.</small>
+        <button class="secondary outline" style="float:right;margin-top:-0.25rem"
+                onclick="rebuildFaceClusters(this)">🔄 Neu clustern</button>
+    </p>
+    <div id="face-cluster-grid" style="display:flex;flex-wrap:wrap;gap:1rem;margin-top:1rem">
+        {% for cluster in face_clusters %}
+        <div class="face-card" data-cluster-id="{{ cluster.id }}"
+             style="text-align:center;width:110px">
+            <img src="/api/faces/{{ cluster.id }}/thumbnail"
+                 alt="{{ cluster.label or 'Person' }}"
+                 width="96" height="96"
+                 style="border-radius:50%;object-fit:cover;border:2px solid var(--pico-muted-border-color)"
+                 onerror="this.src='/static/face_placeholder.svg'">
+            <div style="margin-top:0.4rem">
+                <input type="text"
+                       class="face-name-input"
+                       value="{{ cluster.label or '' }}"
+                       placeholder="Name vergeben…"
+                       style="width:100%;font-size:0.8rem;padding:0.2rem 0.4rem;text-align:center"
+                       data-cluster-id="{{ cluster.id }}"
+                       onblur="saveFaceLabel(this)"
+                       onkeydown="if(event.key==='Enter'){this.blur()}">
+                <small style="color:var(--pico-muted-color)">{{ cluster.face_count }} Foto{{ 's' if cluster.face_count != 1 else '' }}</small>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p>Noch keine Gesichter erkannt. Bilder importieren und dann
+        <button class="secondary outline" style="display:inline;padding:0.2rem 0.6rem"
+                onclick="rebuildFaceClusters(this)">Clustering starten</button>.
+    </p>
+    {% endif %}
+</article>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveFaceLabel(input) {
+    const clusterId = input.dataset.clusterId;
+    const label = input.value.trim();
+    if (!label) return;
+    try {
+        const resp = await fetch(`/api/faces/${clusterId}/label`, {
+            method: "PATCH",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({label})
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        input.style.borderColor = "green";
+        setTimeout(() => input.style.borderColor = "", 1500);
+    } catch (e) {
+        input.style.borderColor = "red";
+        showFlash("Fehler beim Speichern: " + e.message, "error");
+    }
+}
+
+async function rebuildFaceClusters(btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Wird neu geclustert…";
+    try {
+        const resp = await fetch("/api/faces/rebuild-clusters", {method: "POST"});
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        showFlash(`Clustering abgeschlossen: ${data.clusters} Personen, ${data.faces} Gesichter`, "success");
+        setTimeout(() => location.reload(), 1200);
+    } catch (e) {
+        showFlash("Fehler: " + e.message, "error");
+        btn.disabled = false;
+        btn.textContent = "🔄 Neu clustern";
+    }
+}
+</script>

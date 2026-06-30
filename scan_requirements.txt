@@ -1,0 +1,385 @@
+# DocScan PWA – Full Implementation Prompt for GitHub Copilot
+
+## YOUR TASK
+Implement a complete Progressive Web App (PWA) called "DocScan" based on the architecture below.
+Implement ALL files completely – no placeholders, no "TODO" comments, no skipped sections.
+Every file must be production-ready and fully functional.
+
+---
+
+## TECH STACK
+- React 18 + TypeScript
+- Vite 5 + vite-plugin-pwa
+- Tailwind CSS
+- Zustand (state management)
+- Axios (HTTP client)
+- OpenCV.js (edge detection, loaded from /public/opencv/opencv.js)
+- uuid v4 (GUID generation)
+- Backend: Node.js + Express + Multer
+
+---
+
+## PROJECT STRUCTURE TO CREATE
+
+docscan-pwa/
+├── public/
+│   ├── manifest.json
+│   ├── icons/icon-192.png        ← placeholder, skip
+│   └── opencv/opencv.js          ← placeholder, skip (user downloads manually)
+├── src/
+│   ├── main.tsx
+│   ├── App.tsx
+│   ├── index.css
+│   ├── pages/
+│   │   ├── ScanPage.tsx
+│   │   └── ReviewPage.tsx
+│   ├── components/
+│   │   ├── CameraView.tsx
+│   │   ├── DocumentOverlay.tsx
+│   │   ├── ScanButton.tsx
+│   │   ├── ReviewCard.tsx
+│   │   ├── StatusToast.tsx
+│   │   └── LoadingSpinner.tsx
+│   ├── hooks/
+│   │   ├── useCamera.ts
+│   │   ├── useOpenCV.ts
+│   │   └── useUpload.ts
+│   ├── store/
+│   │   └── scanStore.ts
+│   ├── services/
+│   │   ├── api.ts
+│   │   └── documentService.ts
+│   └── utils/
+│       ├── guid.ts
+│       ├── imageUtils.ts
+│       └── errorMessages.ts
+├── server/
+│   ├── index.js
+│   ├── routes/upload.js
+│   └── config.js
+├── vite.config.ts
+├── tailwind.config.js
+├── tsconfig.json
+└── package.json
+
+---
+
+## DETAILED IMPLEMENTATION REQUIREMENTS
+
+### GENERAL UI
+- Dark theme: background #0f172a (slate-900), accent #3b82f6 (blue-500)
+- All UI text in GERMAN
+- Fully responsive, optimized for portrait mobile (Android Chrome)
+- No external UI component library – pure Tailwind CSS only
+- Use React Router v6 for navigation between ScanPage and ReviewPage
+
+---
+
+### FILE: package.json
+Include all dependencies:
+- react, react-dom, react-router-dom
+- zustand, axios, uuid
+- @types/uuid, @types/react, @types/react-dom
+- vite, @vitejs/plugin-react, vite-plugin-pwa
+- tailwindcss, autoprefixer, postcss
+- @vitejs/plugin-basic-ssl (for HTTPS in dev)
+Include scripts: dev, build, preview
+
+---
+
+### FILE: vite.config.ts
+- Enable HTTPS via @vitejs/plugin-basic-ssl
+- Configure vite-plugin-pwa:
+  - registerType: 'autoUpdate'
+  - manifest: name "DocScan", short_name "DocScan", theme_color "#3b82f6", background_color "#0f172a"
+  - icons: 192x192 and 512x512
+- Proxy /api → http://localhost:3001 (for dev)
+
+---
+
+### FILE: src/main.tsx
+- Render App inside BrowserRouter and StrictMode
+
+---
+
+### FILE: src/App.tsx
+- Route "/" → ScanPage
+- Route "/review" → ReviewPage
+- Wrap in a div with dark background class
+
+---
+
+### FILE: src/index.css
+- Tailwind directives (@tailwind base/components/utilities)
+- Body: dark background, no scroll bounce, touch-action manipulation
+
+---
+
+### FILE: src/utils/guid.ts
+- Export function generateGuid(): string using uuid v4
+
+---
+
+### FILE: src/utils/errorMessages.ts
+- Export ERROR_MESSAGES record (German):
+  - NotAllowedError: Kamera-Zugriff verweigert...
+  - NotFoundError: Keine Kamera gefunden...
+  - OverconstrainedError: Auflösung nicht unterstützt...
+  - NotReadableError: Kamera wird bereits verwendet...
+  - UPLOAD_TIMEOUT: Upload-Timeout, Verbindung prüfen...
+  - UPLOAD_SERVER_ERROR: Serverfehler beim Speichern...
+  - UPLOAD_NETWORK_ERROR: Keine Verbindung zum Server...
+  - UPLOAD_UNAUTHORIZED: Nicht autorisiert...
+  - OPENCV_LOAD_ERROR: Bibliothek konnte nicht geladen werden...
+  - UNKNOWN_ERROR: Unbekannter Fehler...
+- Export SUCCESS_MESSAGES with UPLOAD_SUCCESS(guid, count) template string
+
+---
+
+### FILE: src/utils/imageUtils.ts
+- Export function canvasToBlob(canvas: HTMLCanvasElement, quality = 0.92): Promise<Blob>
+  → Returns JPEG blob at given quality
+- Export function applyPerspectiveCorrection(cv: any, srcMat: any, corners: number[][]): any
+  → Uses cv.getPerspectiveTransform + cv.warpPerspective
+  → Output size: 794 × 1123 (A4 at 96dpi)
+  → Orders corners: top-left, top-right, bottom-right, bottom-left before transform
+
+---
+
+### FILE: src/store/scanStore.ts
+Use Zustand. Define:
+
+interface ScannedPage {
+  index: number;        // 1-based
+  blob: Blob;
+  previewUrl: string;   // URL.createObjectURL
+}
+
+interface ScanSession {
+  guid: string | null;
+  pages: ScannedPage[];
+}
+
+Actions:
+- addPage(blob: Blob): generates GUID on first page, increments index, creates previewUrl
+- clearSession(): revokes all object URLs, resets session
+- removeLastPage(): removes last page, revokes its URL
+
+---
+
+### FILE: src/hooks/useCamera.ts
+- Accept videoRef: RefObject<HTMLVideoElement>
+- On mount: call getUserMedia with:
+  - facingMode: { ideal: 'environment' }
+  - width: { ideal: 1920 }, height: { ideal: 1080 }
+  - advanced: [{ focusMode: 'continuous' }]
+- Assign stream to videoRef.current.srcObject
+- On error: map error.name to ERROR_MESSAGES, set error state
+- Return: { isReady: boolean, error: string | null, stream: MediaStream | null }
+- On unmount: stop all stream tracks
+
+---
+
+### FILE: src/hooks/useOpenCV.ts
+This is the most critical hook. Implement fully:
+
+State:
+- isLoaded: boolean
+- error: string | null
+- detectedCorners: number[][] | null  (4 points or null)
+
+On mount:
+- Check if window.cv already exists
+- If not: dynamically inject <script src="/opencv/opencv.js"> into DOM
+- Wait for cv.onRuntimeInitialized callback
+- Set isLoaded = true when ready
+- On failure: set error = ERROR_MESSAGES.OPENCV_LOAD_ERROR
+
+Export function startDetectionLoop(videoRef, canvasRef):
+- Use requestAnimationFrame loop
+- Each frame:
+  1. Draw video frame to offscreen canvas
+  2. Read into cv.Mat via cv.imread
+  3. Convert to grayscale
+  4. Apply GaussianBlur (5×5, sigma=0)
+  5. Apply Canny edge detection (threshold1=75, threshold2=200)
+  6. Find external contours (RETR_EXTERNAL, CHAIN_APPROX_SIMPLE)
+  7. For each contour: approxPolyDP with epsilon = 0.02 * arcLength
+  8. Keep 4-point contours with area > 10% of frame area
+  9. Pick largest valid contour
+  10. Set detectedCorners (normalized to canvas display size)
+  11. Clean up all cv.Mat objects (delete)
+- Return stopLoop function
+
+---
+
+### FILE: src/hooks/useUpload.ts
+State:
+- isUploading: boolean
+- progress: number (0-100)
+- error: string | null
+- success: boolean
+
+Export function uploadSession(guid, pages):
+- Build FormData with all blobs
+- Filename pattern: {guid}_{index padded to 2 digits}.jpg
+- POST to /api/upload via axios
+- Track onUploadProgress → update progress state
+- On axios error:
+  - error.code === 'ECONNABORTED' → UPLOAD_TIMEOUT
+  - response.status === 401 → UPLOAD_UNAUTHORIZED
+  - response.status >= 500 → UPLOAD_SERVER_ERROR
+  - no response → UPLOAD_NETWORK_ERROR
+- On success: set success = true
+- Reset isUploading when done
+
+---
+
+### FILE: src/components/StatusToast.tsx
+Props: { message: string; type: 'success' | 'error' | 'info'; onClose: () => void }
+- Fixed position: bottom-center of screen
+- Auto-dismiss after 5 seconds
+- Success: green background with ✅
+- Error: red background with ❌
+- Info: blue background with ℹ️
+- Slide-up animation via Tailwind (translate-y, opacity transition)
+- Close button (×) in top-right corner
+
+---
+
+### FILE: src/components/LoadingSpinner.tsx
+Props: { progress?: number; label?: string }
+- Centered overlay with semi-transparent dark background
+- Circular spinner (CSS animation, no library)
+- If progress provided: show percentage text
+- If label provided: show label below spinner
+
+---
+
+### FILE: src/components/DocumentOverlay.tsx
+Props: { corners: number[][] | null; width: number; height: number }
+- Renders an SVG overlay absolutely positioned over the camera view
+- If corners !== null: draw a quadrilateral polygon connecting the 4 corner points
+  - Stroke: green (#22c55e) when detected, width 3px
+  - Fill: rgba(34, 197, 94, 0.1)
+  - Animate with a subtle pulse (opacity 0.8↔1.0)
+- If corners === null: draw a centered dashed rectangle (70% of view) in orange/yellow
+  - Indicates "searching for document"
+- In top area: show status text
+  - Detected: "Dokument erkannt ✓" in green
+  - Not detected: "Dokument wird gesucht..." in yellow
+
+---
+
+### FILE: src/components/ScanButton.tsx
+Props: { onScan: () => void; disabled?: boolean }
+- Large circular button (80px diameter), centered at bottom
+- Blue background (#3b82f6), white camera icon (📷 or SVG)
+- Press animation: scale down to 0.9 on active
+- Disabled state: gray, no pointer events
+- Label above: "Scannen"
+
+---
+
+### FILE: src/components/ReviewCard.tsx
+Props: { page: ScannedPage; onRemove: () => void }
+- Show image thumbnail (previewUrl) with page index badge (top-left)
+- Remove button (×) overlay (top-right), red circle
+- Shadow + rounded corners
+- Tap on image: open full-screen preview (use dialog/modal)
+  - Modal shows full image, close on tap outside or × button
+
+---
+
+### FILE: src/components/CameraView.tsx
+Props: { videoRef, canvasRef, corners, viewDimensions }
+- Container: relative, full viewport height, overflow hidden, black background
+- <video> element: absolute, full size, objectFit cover, playsInline, muted, autoPlay
+- <canvas> element: hidden (used for frame processing only)
+- <DocumentOverlay> positioned absolutely over video, same dimensions
+
+---
+
+### FILE: src/pages/ScanPage.tsx
+This is the main camera page. Implement fully:
+
+Layout (full screen, dark):
+- Top bar: "DocScan" title (left) + page counter "Seite X" (right, shown if session has pages)
+- Middle: CameraView (full remaining height)
+- Bottom bar: ScanButton centered
+
+Logic:
+1. useCamera(videoRef) → handle camera errors with StatusToast
+2. useOpenCV() → startDetectionLoop when camera is ready
+3. On scan button press:
+   a. Stop detection loop temporarily
+   b. Capture current video frame to canvas
+   c. If detectedCorners: apply perspective correction via applyPerspectiveCorrection
+   d. If no corners: use raw frame (show info toast: "Kein Dokument erkannt – Originalbild wird verwendet")
+   e. Convert canvas to JPEG blob (quality 0.92)
+   f. Call addPage(blob) from store
+   g. Navigate to /review
+4. If camera error: show full-screen error message with retry button
+5. Show OpenCV loading state: semi-transparent overlay "Kamera wird initialisiert..."
+
+---
+
+### FILE: src/pages/ReviewPage.tsx
+Layout:
+- Header: "Erfasste Seiten" + page count badge
+- Scrollable grid: 2 columns of ReviewCards
+- Bottom action bar (fixed):
+  - Left: "✗ Abbrechen" button (red/outlined)
+  - Center: "+ Seite" button (blue/outlined) → navigate to / (scan another page)
+  - Right: "✓ Speichern" button (green/filled)
+
+Logic:
+1. Read session from store
+2. If session is empty: redirect to /
+3. On "+ Seite": navigate back to /
+4. On "Abbrechen":
+   - Show confirmation dialog: "Alle Scans verwerfen?"
+   - On confirm: clearSession() + navigate to /
+5. On "Speichern":
+   a. Show LoadingSpinner with progress
+   b. Call uploadSession from useUpload
+   c. On success:
+      - Show StatusToast success with GUID and page count
+      - Wait 2 seconds
+      - clearSession()
+      - Navigate to /
+   d. On error:
+      - Show StatusToast error with specific message
+      - Keep session (user can retry)
+      - Show "Erneut versuchen" option
+
+---
+
+### FILE: src/services/api.ts
+- Create axios instance with:
+  - baseURL: import.meta.env.VITE_API_BASE_URL || '/api'
+  - timeout: 30000
+  - headers: Accept application/json
+- Add response interceptor: log errors to console in dev mode
+
+---
+
+### FILE: src/services/documentService.ts
+- Export uploadSession(guid: string, pages: ScannedPage[], onProgress: (n: number) => void): Promise<void>
+- Build FormData, append each blob with filename {guid}_{padded index}.jpg
+- POST to /upload using the api axios instance
+- Throw typed errors that useUpload.ts can catch and categorize
+
+---
+
+### FILE: server/config.js
+```js
+module.exports = {
+  PORT: process.env.PORT || 3001,
+  INBOX_PATH: process.env.INBOX_PATH || './inbox',
+  MAX_FILE_SIZE_MB: 20,
+  ALLOWED_EXTENSIONS: ['.jpg', '.jpeg', '.png'],
+  CORS_ORIGIN: process.env.CORS_ORIGIN || 'https://localhost:5173',
+};
+
+

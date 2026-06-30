@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}DocStoreAI{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <nav class="container-fluid">
+        <ul>
+            <li><strong><a href="/dashboard" class="brand">🗄 DocStoreAI</a></strong></li>
+        </ul>
+        <ul>
+            <li><a href="/dashboard">Dashboard</a></li>
+            <li><a href="/scan">Scan</a></li>
+            <li><a href="/search">Suche</a></li>
+            <li><a href="/chat">Chat</a></li>
+            <li><a href="/files">Dateien</a></li>
+            <li><a href="/jobs">Jobs</a></li>
+            <li><a href="/review">Review</a></li>
+            <li><a href="/settings">Einstellungen</a></li>
+            <li><a href="/auth/logout">Abmelden</a></li>
+        </ul>
+    </nav>
+
+    <main class="container">
+        <div id="flash-message" class="flash-message" style="display:none"></div>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="container-fluid">
+        <small>DocStoreAI – Lokale KI-Dokumentenverwaltung</small>
+    </footer>
+
+    <script src="/static/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

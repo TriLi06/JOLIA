@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Dashboard – DocStoreAI{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+
+{% if model_mismatch_warning %}
+<article style="border-left:4px solid var(--pico-color-orange-500); background:var(--pico-color-orange-50)">
+    <p>⚠️ <strong>Index-Versionswarnung:</strong> {{ model_mismatch_warning }}
+    <a href="#" onclick="reindex('vectors')" style="margin-left:1rem">Jetzt reindizieren →</a></p>
+</article>
+{% endif %}
+
+<!-- Statistik-Karten -->
+<div class="grid">
+    <article>
+        <header>📄 Dateien gesamt</header>
+        <h2>{{ status_counts.values() | sum }}</h2>
+    </article>
+    <article>
+        <header>✅ Verarbeitet</header>
+        <h2>{{ status_counts.get('processed', 0) }}</h2>
+    </article>
+    <article>
+        <header>⏳ In Bearbeitung</header>
+        <h2>{{ status_counts.get('processing', 0) + status_counts.get('queued', 0) }}</h2>
+    </article>
+    <article>
+        <header>⚠️ Fehler</header>
+        <h2>{{ status_counts.get('failed', 0) }}</h2>
+    </article>
+    <article>
+        <header><a href="/review" style="text-decoration:none">✏️ Review nötig</a></header>
+        <h2>
+            {% set review_count = status_counts.get('needs_review', 0) %}
+            {% if review_count > 0 %}
+            <a href="/review" style="color:var(--pico-color-orange-500)">{{ review_count }}</a>
+            {% else %}
+            0
+            {% endif %}
+        </h2>
+    </article>
+</div>
+
+<!-- ChromaDB-Statistik -->
+<div class="grid">
+    {% for col_name, count in chroma_counts.items() %}
+    <article>
+        <header>🔍 {{ col_name }}</header>
+        <p>{{ count }} Vektoren</p>
+    </article>
+    {% endfor %}
+</div>
+
+<!-- Aktionen -->
+<div class="grid">
+    <article>
+        <h3>📥 Inbox importieren</h3>
+        <p><small>Inbox: <code>{{ inbox_path }}</code></small></p>
+        <button id="btn-import" onclick="importInbox()">Inbox jetzt scannen</button>
+        <div id="import-result"></div>
+    </article>
+
+    <article>
+        <h3>💾 Backup</h3>
+        {% if last_backup %}
+            <p>Letztes Backup: <strong>{{ last_backup.started_at[:10] if last_backup.started_at else '–' }}</strong>
+            – Status: <mark>{{ last_backup.status }}</mark></p>
+            {% if last_backup.files_copied %}
+            <p><small>{{ last_backup.files_copied }} Dateien kopiert</small></p>
+            {% endif %}
+        {% else %}
+            <p>Noch kein Backup durchgeführt.</p>
+        {% endif %}
+        <button onclick="startBackup()" class="secondary">Backup jetzt starten</button>
+        <div id="backup-result"></div>
+    </article>
+
+    <article>
+        <h3>🔄 Reindizieren</h3>
+        <p>Vektorindex oder vollständigen Rebuild starten.</p>
+        <div class="grid">
+            <button onclick="reindex('vectors')" class="outline">Nur Vektoren</button>
+            <button onclick="reindex('full')" class="outline secondary">Vollständiger Rebuild</button>
+        </div>
+        <div id="reindex-result"></div>
+    </article>
+</div>
+
+<!-- Zuletzt importierte Dateien -->
+<article>
+    <h3>🕐 Zuletzt importiert</h3>
+    {% if recent_files %}
+    <table>
+        <thead>
+            <tr>
+                <th>Dateiname</th>
+                <th>Typ</th>
+                <th>Status</th>
+                <th>Importiert</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in recent_files %}
+            <tr>
+                <td><a href="/files/{{ f.id }}">{{ f.original_filename }}</a></td>
+                <td><small>{{ f.content_type or '–' }}</small></td>
+                <td><span class="status-badge status-{{ f.status }}">{{ f.status }}</span></td>
+                <td><small>{{ f.imported_at[:16] if f.imported_at else '–' }}</small></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>Noch keine Dateien importiert. <a href="#" onclick="importInbox()">Inbox scannen →</a></p>
+    {% endif %}
+</article>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function importInbox() {
+    const btn = document.getElementById('btn-import');
+    const result = document.getElementById('import-result');
+    btn.disabled = true;
+    btn.textContent = 'Scanne…';
+    try {
+        const r = await fetch('/api/files/import-inbox', { method: 'POST' });
+        const data = await r.json();
+        result.innerHTML = `<p class="success">✅ ${data.message}</p>`;
+        setTimeout(() => location.reload(), 2000);
+    } catch(e) {
+        result.innerHTML = `<p class="error">❌ Fehler: ${e.message}</p>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Inbox jetzt scannen';
+    }
+}
+
+async function startBackup() {
+    const result = document.getElementById('backup-result');
+    result.innerHTML = '<p>⏳ Backup wird gestartet…</p>';
+    try {
+        const r = await fetch('/api/backup/start', { method: 'POST' });
+        const data = await r.json();
+        result.innerHTML = `<p class="success">✅ ${data.message}</p>`;
+    } catch(e) {
+        result.innerHTML = `<p class="error">❌ Fehler: ${e.message}</p>`;
+    }
+}
+
+async function reindex(mode) {
+    const result = document.getElementById('reindex-result');
+    result.innerHTML = '<p>⏳ Reindizierung wird gestartet…</p>';
+    try {
+        const r = await fetch(`/api/reindex/${mode}`, { method: 'POST' });
+        const data = await r.json();
+        result.innerHTML = `<p class="success">✅ ${data.message}</p>`;
+    } catch(e) {
+        result.innerHTML = `<p class="error">❌ Fehler: ${e.message}</p>`;
+    }
+}
+</script>
+{% endblock %}

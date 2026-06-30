@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% block title %}{{ file.original_filename }} – DocStoreAI{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+    <ul>
+        <li><a href="/files">Dateien</a></li>
+        <li>{{ file.original_filename }}</li>
+    </ul>
+</nav>
+
+{% if file.content_type == 'images' %}
+<div style="text-align:center">
+    <img src="/api/files/{{ file.id }}/thumbnail" alt="{{ file.original_filename }}" class="file-detail-thumb"
+         onerror="this.style.display='none'">
+</div>
+{% endif %}
+
+{% if file.ai_summary %}
+<div class="ai-summary-banner">
+    🤖 <strong>KI-Zusammenfassung:</strong> {{ file.ai_summary }}
+</div>
+{% endif %}
+
+<div class="grid">
+    <div>
+        <h1>{{ file.original_filename }}</h1>
+
+        <table>
+            <tr><th>Typ</th><td>{{ file.content_type or '–' }} ({{ file.mime_type or '–' }})</td></tr>
+            <tr><th>Status</th><td><span class="status-badge status-{{ file.status }}">{{ file.status }}</span></td></tr>
+            <tr><th>Größe</th><td>{{ "%.1f"|format((file.file_size or 0)/1024) }} KB</td></tr>
+            <tr><th>Importiert</th><td>{{ file.imported_at[:16] if file.imported_at else '–' }}</td></tr>
+            <tr><th>Verarbeitet</th><td>{{ file.processed_at[:16] if file.processed_at else '–' }}</td></tr>
+            <tr><th>SHA256</th><td><small>{{ file.sha256 }}</small></td></tr>
+            <tr><th>Archivpfad</th><td><small>{{ file.archive_path }}</small></td></tr>
+        </table>
+
+        {% if file.error_message %}
+        <article class="error-box">
+            <h4>⚠️ Fehler</h4>
+            <pre>{{ file.error_message }}</pre>
+        </article>
+        {% endif %}
+
+        <div class="grid">
+            <a href="/api/files/{{ file.id }}/download" role="button">⬇️ Originaldatei herunterladen</a>
+            <button onclick="reprocessFile('{{ file.id }}')" class="outline">↻ Neu verarbeiten</button>
+            <a href="/search?q={{ file.original_filename }}" role="button" class="outline secondary">🔍 Suchen</a>
+        </div>
+    </div>
+
+    <!-- Chunks -->
+    <div>
+        <h3>📑 Chunks ({{ chunks|length }})</h3>
+        {% for chunk in chunks[:5] %}
+        <article>
+            <header><small>Chunk {{ chunk.chunk_index }}{% if chunk.page %} · Seite {{ chunk.page }}{% endif %} · {{ chunk.chunk_type }}</small></header>
+            <p><small>{{ chunk.text[:300] }}{% if chunk.text|length > 300 %}…{% endif %}</small></p>
+        </article>
+        {% endfor %}
+        {% if chunks|length > 5 %}
+        <p><small>… und {{ chunks|length - 5 }} weitere Chunks</small></p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Ähnliche Dateien -->
+<section class="similar-files-section">
+    <h3>🔗 Ähnliche Dateien finden</h3>
+
+    <!-- Chat-Eingabe für freie Suche im Kontext dieser Datei -->
+    <div class="similar-chat-form">
+        <input type="text" id="similar-query" placeholder="z.B. 'finde alle Reparaturrechnungen für dieses Fahrzeug'…">
+        <button onclick="searchSimilarQuery()">🔍 Suchen</button>
+    </div>
+
+    <!-- Schnell-Buttons -->
+    <div class="similar-suggestions">
+        <button class="outline secondary" onclick="loadSimilar('similar', 'Semantisch ähnliche Dateien')">📄 Ähnliche Inhalte</button>
+        {% if file.content_type == 'images' %}
+        <button class="outline secondary" onclick="loadSimilar('similar-persons', 'Gleiche Personen')">👥 Gleiche Personen</button>
+        <button class="outline secondary" onclick="loadSimilar('similar-location', 'Gleicher Ort')">📍 Gleicher Ort</button>
+        <button class="outline secondary" onclick="loadSimilar('similar-date', 'Gleiches Datum')">📅 Gleiches Datum</button>
+        {% endif %}
+    </div>
+
+    <div id="similar-status"></div>
+    <div id="similar-results" class="similar-results"></div>
+</section>
+
+<!-- OCR-Review für Bilder mit niedrigem Konfidenzwert -->
+{% if file.status == 'needs_review' and file.content_type == 'images' %}
+<article id="review-section">
+    <h3>✏️ OCR-Text korrigieren</h3>
+    <p>Der erkannte Text hat möglicherweise Fehler. Bitte korrigieren und speichern:</p>
+    <textarea id="review-text" rows="8" style="width:100%">{{ sidecar_json.get('ocr_text', '') if sidecar_json else '' }}</textarea>
+    <button onclick="saveReviewText('{{ file.id }}')">Text speichern &amp; Re-Embedding starten</button>
+    <div id="review-result"></div>
+</article>
+{% endif %}
+
+<!-- Manuelle Beschreibung -->
+<article id="user-description-section">
+    <h3>📝 Eigene Beschreibung</h3>
+    <p><small>Diese Beschreibung wird als durchsuchbarer Chunk gespeichert und kann jederzeit geändert werden.</small></p>
+    <textarea id="user-description-text" rows="4" style="width:100%" placeholder="Beschreibung eingeben…">{{ file.user_description or '' }}</textarea>
+    <div style="display:flex;gap:.5rem;margin-top:.5rem">
+        <button onclick="saveUserDescription('{{ file.id }}')">💾 Beschreibung speichern</button>
+        {% if file.user_description %}
+        <button class="outline secondary" onclick="clearUserDescription('{{ file.id }}')">🗑 Löschen</button>
+        {% endif %}
+    </div>
+    <div id="user-description-result"></div>
+</article>
+
+<!-- Sidecar Markdown -->
+{% if sidecar_md %}
+<article>
+    <details>
+        <summary><strong>📄 Markdown-Sidecar</strong></summary>
+        <pre style="white-space:pre-wrap; font-size:0.85rem">{{ sidecar_md }}</pre>
+    </details>
+</article>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const FILE_ID = '{{ file.id }}';
+
+async function reprocessFile(fileId) {
+    if (!confirm('Datei erneut verarbeiten?')) return;
+    const r = await fetch(`/api/files/${fileId}/reprocess`, { method: 'POST' });
+    const data = await r.json();
+    alert(data.message);
+    location.reload();
+}
+
+async function saveReviewText(fileId) {
+    const text = document.getElementById('review-text').value;
+    const result = document.getElementById('review-result');
+    try {
+        const r = await fetch(`/api/files/${fileId}/review-text`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+        const data = await r.json();
+        result.innerHTML = `<p class="success">✅ ${data.message}</p>`;
+    } catch(e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.appendChild(document.createTextNode(text || ''));
+    return d.innerHTML;
+}
+
+async function loadSimilar(endpoint, label) {
+    const status = document.getElementById('similar-status');
+    const results = document.getElementById('similar-results');
+    status.innerHTML = `<p>🔍 Lade ${escapeHtml(label)}…</p>`;
+    results.innerHTML = '';
+    try {
+        const r = await fetch(`/api/files/${FILE_ID}/${endpoint}`);
+        if (!r.ok) {
+            const err = await r.json();
+            status.innerHTML = `<p class="error">❌ ${escapeHtml(err.detail || 'Fehler')}</p>`;
+            return;
+        }
+        const data = await r.json();
+        status.innerHTML = `<p><strong>${data.total}</strong> Ergebnisse für „${escapeHtml(label)}"</p>`;
+        renderSimilarResults(data.results);
+    } catch(e) {
+        status.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+async function searchSimilarQuery() {
+    const query = document.getElementById('similar-query').value.trim();
+    if (!query) return;
+    const status = document.getElementById('similar-status');
+    const results = document.getElementById('similar-results');
+    status.innerHTML = '<p>🔍 Suche läuft…</p>';
+    results.innerHTML = '';
+    try {
+        const params = new URLSearchParams({ q: query, n: 10 });
+        const r = await fetch(`/api/search?${params}`);
+        const data = await r.json();
+        status.innerHTML = `<p><strong>${data.total}</strong> Ergebnisse für „${escapeHtml(query)}"</p>`;
+        // Konvertiere SearchResult in das SimilarResult-Format
+        const mapped = data.results.map(item => ({
+            file_id: item.file_id,
+            file_name: item.file_name,
+            source_path: item.source_path,
+            content_type: item.content_type,
+            score: item.score,
+            ai_summary: item.summary,
+            thumbnail_url: item.thumbnail_url,
+        }));
+        renderSimilarResults(mapped);
+    } catch(e) {
+        status.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+function renderSimilarResults(results) {
+    const container = document.getElementById('similar-results');
+    if (!results || results.length === 0) {
+        container.innerHTML = '<p>Keine ähnlichen Dateien gefunden.</p>';
+        return;
+    }
+    const cards = results.map(item => {
+        const thumb = item.thumbnail_url
+            ? `<img src="${item.thumbnail_url}" alt="" class="similar-card-thumb" loading="lazy" onerror="this.style.display='none'">`
+            : `<div class="similar-card-thumb" style="background:var(--secondary-background);display:flex;align-items:center;justify-content:center;font-size:1.5rem;">📄</div>`;
+        const summary = item.ai_summary ? `<div class="similar-card-summary">${escapeHtml(item.ai_summary)}</div>` : '';
+        const score = item.score < 1.0 ? ` <small>(${item.score.toFixed(2)})</small>` : '';
+        return `
+        <a href="/files/${item.file_id}" class="similar-card">
+            ${thumb}
+            <div class="similar-card-info">
+                <div class="similar-card-name">${escapeHtml(item.file_name)}${score}</div>
+                ${summary}
+            </div>
+        </a>`;
+    }).join('');
+    container.innerHTML = cards;
+}
+
+// Enter-Taste im Suchfeld
+document.getElementById('similar-query').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') searchSimilarQuery();
+});
+
+async function saveUserDescription(fileId) {
+    const text = document.getElementById('user-description-text').value.trim();
+    const result = document.getElementById('user-description-result');
+    if (!text) { result.innerHTML = '<p class="error">❌ Bitte einen Text eingeben.</p>'; return; }
+    try {
+        const r = await fetch(`/api/files/${fileId}/user-description`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: text })
+        });
+        const data = await r.json();
+        result.innerHTML = `<p class="success">✅ ${data.message}</p>`;
+        setTimeout(() => location.reload(), 800);
+    } catch(e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+async function clearUserDescription(fileId) {
+    if (!confirm('Beschreibung wirklich löschen?')) return;
+    const result = document.getElementById('user-description-result');
+    try {
+        const r = await fetch(`/api/files/${fileId}/user-description`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: '' })
+        });
+        const data = await r.json();
+        result.innerHTML = `<p class="success">✅ ${data.message}</p>`;
+        setTimeout(() => location.reload(), 800);
+    } catch(e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+</script>
+{% endblock %}

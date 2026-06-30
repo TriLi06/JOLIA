@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Jobs – DocStoreAI{% endblock %}
+
+{% block content %}
+<h1>⚙️ Verarbeitungs-Jobs <small>({{ total }})</small></h1>
+
+<button onclick="location.reload()" class="outline secondary">🔄 Aktualisieren</button>
+
+{% if jobs %}
+<table>
+    <thead>
+        <tr>
+            <th>Typ</th>
+            <th>Datei</th>
+            <th>Status</th>
+            <th>Gestartet</th>
+            <th>Beendet</th>
+            <th>Log</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for job in jobs %}
+        <tr>
+            <td><small>{{ job.job_type or '–' }}</small></td>
+            <td>
+                {% if job.file %}
+                <a href="/files/{{ job.file_id }}"><small>{{ job.file.original_filename }}</small></a>
+                {% else %}
+                <small>–</small>
+                {% endif %}
+            </td>
+            <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
+            <td><small>{{ job.started_at[:16] if job.started_at else '–' }}</small></td>
+            <td><small>{{ job.finished_at[:16] if job.finished_at else '–' }}</small></td>
+            <td>
+                {% if job.error_message %}
+                <details>
+                    <summary><small>Fehler</small></summary>
+                    <pre style="font-size:0.75rem">{{ job.error_message[:300] }}</pre>
+                </details>
+                {% elif job.log %}
+                <small>{{ job.log[:80] }}{% if job.log|length > 80 %}…{% endif %}</small>
+                {% else %}
+                <small>–</small>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>Noch keine Jobs vorhanden.</p>
+{% endif %}
+{% endblock %}
