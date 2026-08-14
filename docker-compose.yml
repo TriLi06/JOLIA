@@ -1,9 +1,9 @@
-# DocStoreAI – komplettes Setup mit einem Befehl:
+# JOLIA Docs – komplettes Setup mit einem Befehl:
 #
 #     docker compose up -d
 #
 # Danach im Browser öffnen:  http://localhost:8080
-# Dateien zum Verarbeiten in  ~/docstoreai/inbox  legen.
+# Dateien zum Verarbeiten in  ~/jolia/inbox  legen.
 #
 # Es ist KEINE manuelle Konfiguration nötig. Beim ersten Start werden
 # automatisch das Ollama-LLM (qwen2.5:3b) und das Embedding-Modell geladen
@@ -33,7 +33,7 @@ services:
     entrypoint: ["/bin/sh", "-c", "ollama pull qwen2.5:3b"]
     restart: "no"
 
-  # Die eigentliche DocStoreAI-Anwendung
+  # Die eigentliche JOLIA Docs-Anwendung
   app:
     build: .
     depends_on:
@@ -45,9 +45,9 @@ services:
       - "8080:8080"
     volumes:
       # Host-Verzeichnisse (werden bei Bedarf automatisch angelegt)
-      - ${HOME}/docstoreai/inbox:/data/inbox
-      - ${HOME}/docstoreai/source_documents:/data/source_documents
-      - ${HOME}/docstoreai/data:/data/store
+      - ${HOME}/jolia/inbox:/data/inbox
+      - ${HOME}/jolia/source_documents:/data/source_documents
+      - ${HOME}/jolia/data:/data/store
     restart: unless-stopped
 
 volumes:

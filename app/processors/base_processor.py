@@ -22,6 +22,9 @@ class ProcessingResult:
     needs_review: bool = False
     sidecar_json_path: str | None = None
     sidecar_md_path: str | None = None
+    sharpness_score: float | None = None
+    perceptual_hash: str | None = None
+    created_at: str | None = None  # inhaltliches Erstellungs-/Belegdatum (EXIF-Aufnahme, Rechnungsdatum) fuer die Timeline
 
 
 class BaseProcessor(ABC):
@@ -32,10 +35,13 @@ class BaseProcessor(ABC):
         ...
 
     def _run_vision_ollama_structured(
-        self, file_path: Path, model: str, base_url: str, timeout: float
+        self, file_path: Path, model: str, base_url: str, timeout: float,
+        context_lines: list[str] | None = None,
     ) -> tuple[str, str, int]:
         """Nutzt ein Ollama-Multimodal-Modell zur strukturierten Bildanalyse.
 
+        `context_lines` (z.B. EXIF-Aufnahmedatum, GPS, Kamera) wird dem Modell als
+        Zusatzinformation mitgegeben, damit die Beschreibung den Kontext beruecksichtigt.
         Gibt zurück: (vision_description, ocr_text, confidence)
         Kann von ImageProcessor und VideoProcessor (Thumbnail-Analyse) genutzt werden.
         """
@@ -43,7 +49,17 @@ class BaseProcessor(ABC):
             from app.services.ollama_service import OllamaService
             svc = OllamaService(base_url=base_url, model=model, timeout=timeout)
 
+            context_block = ""
+            if context_lines:
+                context_block = (
+                    "Zusatzinformationen zum Bild (aus Metadaten, nutze sie zur Einordnung, "
+                    "aber erfinde nichts Zusätzliches):\n"
+                    + "\n".join(f"- {line}" for line in context_lines)
+                    + "\n\n"
+                )
+
             prompt = (
+                context_block +
                 "Du bist ein präziser Bildanalyse-Assistent für ein Dokumenten-Archiv. "
                 "Analysiere das Bild sorgfältig und antworte vollständig auf Deutsch. "
                 "Gib immer eine bestmögliche Analyse ab – auch bei unscharfen, dunklen oder "

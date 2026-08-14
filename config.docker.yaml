@@ -1,14 +1,14 @@
 # Standard-Konfiguration für den Docker-Betrieb.
 # Wird beim Image-Build nach /app/config.yaml kopiert.
 # Alle Pfade sind containerinterne Pfade; sie werden per docker-compose.yml
-# auf Verzeichnisse unter ~/docstoreai/ auf dem Host gemountet.
+# auf Verzeichnisse unter ~/jolia/ auf dem Host gemountet.
 # Normalerweise muss hier NICHTS angepasst werden.
 
 app:
   host: "0.0.0.0"
   port: 8080
   debug: false
-  app_name: "DocStoreAI"
+  app_name: "JOLIA Docs"
   auth_enabled: false
 
 paths:
@@ -31,6 +31,8 @@ models:
   clip_backend: "openclip"
   clip_model: "ViT-B-32"
   clip_pretrained: "/app/data/models/ViT-B-32.pt"
+  clap_model: "laion/larger_clap_music"    # CLAP-Audio-/Musik-Embeddings; Lädt automatisch von HuggingFace Hub
+  # hf_endpoint: "https://hf-mirror.com"   # Nur setzen falls huggingface.co nicht erreichbar ist (Mirror)
 
 processing:
   chunk_size: 1000
@@ -41,15 +43,22 @@ processing:
   enable_audio_transcription: true
   enable_video_transcription: true
   enable_clip_embeddings: true
+  enable_clap_embeddings: true
   enable_face_detection: true
   # Nur die ersten N Sekunden transkribieren (0 = ganze Datei) -> schneller auf CPU
   transcription_sample_seconds: 90
   ocr_languages: "deu+eng"
   ocr_confidence_threshold: 60
+  duplicate_hash_threshold: 8
+  duplicate_time_window_seconds: 120
 
 watcher:
   # Automatischer Import aus der Inbox aktiviert -> einfach Dateien in
-  # ~/docstoreai/inbox legen, sie werden automatisch verarbeitet.
+  # ~/jolia/inbox legen, sie werden automatisch verarbeitet.
   enabled: true
   scan_interval_seconds: 60
   stability_threshold_seconds: 30
+
+scheduled_jobs:
+  clustering: { enabled: true, interval_seconds: 3600 }
+  backup: { enabled: true, interval_seconds: 86400 }

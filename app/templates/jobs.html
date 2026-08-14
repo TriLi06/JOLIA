@@ -1,13 +1,30 @@
 {% extends "base.html" %}
-{% block title %}Jobs – DocStoreAI{% endblock %}
+{% block title %}Jobs – JOLIA Docs{% endblock %}
 
 {% block content %}
-<h1>⚙️ Verarbeitungs-Jobs <small>({{ total }})</small></h1>
+<h1>⚙️ Jobs</h1>
 
+<h2>📅 Geplante Wartungsjobs</h2>
+<table id="schedule-table">
+    <thead>
+        <tr>
+            <th>Job</th>
+            <th>Intervall</th>
+            <th>Zuletzt ausgeführt</th>
+            <th>Nächste Ausführung</th>
+            <th>Status</th>
+            <th>Aktion</th>
+        </tr>
+    </thead>
+    <tbody id="schedule-table-body">
+        <tr><td colspan="6"><small>Lade…</small></td></tr>
+    </tbody>
+</table>
+
+<h2>Job-Historie <small id="jobs-total">({{ total }})</small></h2>
 <button onclick="location.reload()" class="outline secondary">🔄 Aktualisieren</button>
 
-{% if jobs %}
-<table>
+<table id="jobs-history-table">
     <thead>
         <tr>
             <th>Typ</th>
@@ -18,37 +35,143 @@
             <th>Log</th>
         </tr>
     </thead>
-    <tbody>
-        {% for job in jobs %}
-        <tr>
-            <td><small>{{ job.job_type or '–' }}</small></td>
-            <td>
-                {% if job.file %}
-                <a href="/files/{{ job.file_id }}"><small>{{ job.file.original_filename }}</small></a>
-                {% else %}
-                <small>–</small>
-                {% endif %}
-            </td>
-            <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
-            <td><small>{{ job.started_at[:16] if job.started_at else '–' }}</small></td>
-            <td><small>{{ job.finished_at[:16] if job.finished_at else '–' }}</small></td>
-            <td>
-                {% if job.error_message %}
-                <details>
-                    <summary><small>Fehler</small></summary>
-                    <pre style="font-size:0.75rem">{{ job.error_message[:300] }}</pre>
-                </details>
-                {% elif job.log %}
-                <small>{{ job.log[:80] }}{% if job.log|length > 80 %}…{% endif %}</small>
-                {% else %}
-                <small>–</small>
-                {% endif %}
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
+    <tbody id="jobs-history-body"></tbody>
 </table>
-{% else %}
-<p>Noch keine Jobs vorhanden.</p>
-{% endif %}
+<p id="jobs-empty" style="display:none">Noch keine Jobs vorhanden.</p>
+<div id="jobs-sentinel" style="height:1px"></div>
+<p id="jobs-loading" style="display:none"><small>Lade weitere Jobs…</small></p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function fmtRelative(iso, future = false) {
+    if (!iso) return '–';
+    const d = new Date(iso);
+    // future=true erwartet einen Zeitpunkt in der Zukunft (z.B. naechste Ausfuehrung) -
+    // Vorzeichen der Differenz muss dafuer umgedreht werden, sonst wird ein noch weit
+    // entfernter Zeitpunkt faelschlich als "<1 Min." angezeigt.
+    const diffSec = Math.round(((future ? d.getTime() : Date.now()) - (future ? Date.now() : d.getTime())) / 1000);
+    const prefix = future ? 'in' : 'vor';
+    if (diffSec < 60) return `${prefix} <1 Min.`;
+    if (diffSec < 3600) return `${prefix} ${Math.round(diffSec/60)} Min.`;
+    if (diffSec < 86400) return `${prefix} ${Math.round(diffSec/3600)} Std.`;
+    return `${prefix} ${Math.round(diffSec/86400)} Tagen`;
+}
+
+function fmtInterval(sec) {
+    if (sec % 86400 === 0) return `alle ${sec/86400} Tag(e)`;
+    if (sec % 3600 === 0) return `alle ${sec/3600} Std.`;
+    return `alle ${sec}s`;
+}
+
+function statusBadge(task) {
+    if (!task.enabled) return '<span class="status-badge status-skipped_duplicate">Deaktiviert</span>';
+    if (task.is_overdue) return '<span class="status-badge status-failed">Überfällig</span>';
+    if (task.is_due) return '<span class="status-badge status-needs_review">Fällig</span>';
+    return '<span class="status-badge status-processed">Aktuell</span>';
+}
+
+async function loadSchedule() {
+    const tbody = document.getElementById('schedule-table-body');
+    try {
+        const r = await fetch('/api/jobs/schedule/status');
+        const data = await r.json();
+        tbody.innerHTML = data.tasks.map(t => `
+            <tr>
+                <td>${t.label}</td>
+                <td><small>${fmtInterval(t.interval_seconds)}</small></td>
+                <td><small>${fmtRelative(t.last_run_at)}</small></td>
+                <td><small>${t.next_due_at ? fmtRelative(t.next_due_at, true) : '–'}</small></td>
+                <td>${statusBadge(t)}</td>
+                <td><button class="outline secondary small" onclick="runScheduleNow('${t.name}')">▶ Jetzt ausführen</button></td>
+            </tr>`).join('');
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="6"><small>❌ Fehler beim Laden: ${e.message}</small></td></tr>`;
+    }
+}
+
+async function runScheduleNow(taskName) {
+    await fetch(`/api/jobs/schedule/${taskName}/run-now`, { method: 'POST' });
+    showFlash('▶ Job gestartet – Ergebnis erscheint in Kürze in der Job-Historie.');
+    setTimeout(loadSchedule, 2000);
+}
+
+function showFlash(msg) {
+    const el = document.getElementById('flash-message');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+/* ------------------------------------------------------------------ */
+/* Job-Historie: seitenweises Nachladen beim Scrollen (Pagination),    */
+/* damit auch sehr lange Historien Backend und Browser nicht überlasten */
+/* ------------------------------------------------------------------ */
+const JOBS_PAGE_SIZE = 50;
+const jobsState = { offset: 0, total: null, loading: false, done: false };
+
+function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.appendChild(document.createTextNode(text || ''));
+    return d.innerHTML;
+}
+
+function jobRowHtml(j) {
+    const fileCell = j.file_id
+        ? `<a href="/files/${j.file_id}"><small>${escapeHtml(j.original_filename || j.file_id)}</small></a>`
+        : '<small>–</small>';
+    let logCell;
+    if (j.error_message) {
+        logCell = `<details><summary><small>Fehler</small></summary><pre style="font-size:0.75rem">${escapeHtml(j.error_message.slice(0, 300))}</pre></details>`;
+    } else if (j.log) {
+        const truncated = j.log.length > 80 ? j.log.slice(0, 80) + '…' : j.log;
+        logCell = `<small>${escapeHtml(truncated)}</small>`;
+    } else {
+        logCell = '<small>–</small>';
+    }
+    return `
+    <tr>
+        <td><small>${escapeHtml(j.job_type || '–')}</small></td>
+        <td>${fileCell}</td>
+        <td><span class="status-badge status-${escapeHtml(j.status)}">${escapeHtml(j.status)}</span></td>
+        <td><small>${j.started_at ? escapeHtml(j.started_at.slice(0, 16)) : '–'}</small></td>
+        <td><small>${j.finished_at ? escapeHtml(j.finished_at.slice(0, 16)) : '–'}</small></td>
+        <td>${logCell}</td>
+    </tr>`;
+}
+
+async function loadJobsPage() {
+    if (jobsState.loading || jobsState.done) return;
+    jobsState.loading = true;
+    document.getElementById('jobs-loading').style.display = 'block';
+    try {
+        const r = await fetch(`/api/jobs?limit=${JOBS_PAGE_SIZE}&offset=${jobsState.offset}`);
+        const data = await r.json();
+        jobsState.total = data.total;
+        document.getElementById('jobs-total').textContent = `(${data.total})`;
+        const body = document.getElementById('jobs-history-body');
+        body.insertAdjacentHTML('beforeend', data.items.map(jobRowHtml).join(''));
+        jobsState.offset += data.items.length;
+        if (data.items.length < JOBS_PAGE_SIZE || jobsState.offset >= data.total) {
+            jobsState.done = true;
+        }
+        document.getElementById('jobs-empty').style.display = jobsState.total ? 'none' : 'block';
+    } catch (e) {
+        console.warn('Jobs konnten nicht geladen werden', e);
+    } finally {
+        jobsState.loading = false;
+        document.getElementById('jobs-loading').style.display = 'none';
+    }
+}
+
+const jobsObserver = new IntersectionObserver((entries) => {
+    if (entries.some(e => e.isIntersecting)) loadJobsPage();
+}, { rootMargin: '300px 0px' });
+jobsObserver.observe(document.getElementById('jobs-sentinel'));
+loadJobsPage();
+
+loadSchedule();
+setInterval(loadSchedule, 30000);
+</script>
 {% endblock %}

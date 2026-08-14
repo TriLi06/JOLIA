@@ -1,4 +1,4 @@
-# DocStoreAI – Container-Image (CPU-only, ohne GPU)
+# JOLIA Docs – Container-Image (CPU-only, ohne GPU)
 FROM python:3.11-slim
 
 # Modell-Caches in das gemountete Daten-Volume legen -> bleiben über Neustarts erhalten.

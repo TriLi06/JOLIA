@@ -1,20 +1,39 @@
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from app.db import repositories as repo
-from app.services.archive_service import calculate_archive_path, move_to_archive
+from app.services.archive_service import calculate_archive_path, move_to_archive, resolve_archive_path
 from app.services.file_type_service import detect_file_type, is_ignored
 from app.services.hashing_service import compute_sha256
 
 logger = logging.getLogger(__name__)
 
 _PROCESSOR_REGISTRY: dict | None = None
+
+# Begrenzt gleichzeitig laufende process_file()-Aufrufe (Watcher + manuelle Uploads
+# teilen sich dieses Limit), da jeder Aufruf eine DB-Session ueber die gesamte
+# Verarbeitungsdauer offen haelt (OCR/Embeddings/LLM koennen bei grossen Dateien lange
+# dauern) - ohne Begrenzung koennen bei vielen parallelen Jobs mehr Sessions offen sein
+# als der SQLAlchemy-Connection-Pool erlaubt, was zu QueuePool-Timeouts fuehrt.
+_processing_semaphore: threading.Semaphore | None = None
+_processing_semaphore_size: int | None = None
+
+
+def _get_processing_semaphore() -> threading.Semaphore:
+    global _processing_semaphore, _processing_semaphore_size
+    from app.config import get_config
+    size = max(1, get_config().processing.max_concurrent_processing)
+    if _processing_semaphore is None or _processing_semaphore_size != size:
+        _processing_semaphore = threading.Semaphore(size)
+        _processing_semaphore_size = size
+    return _processing_semaphore
 
 
 def _get_processor_registry() -> dict:
@@ -87,17 +106,20 @@ def import_file(file_path: Path, db: Session, archive_root: Path) -> dict:
 
     mime_type, content_type = detect_file_type(file_path)
     file_size = file_path.stat().st_size
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
 
     file_id = str(uuid.uuid4())
     target_path = calculate_archive_path(archive_root, file_path.name, content_type, now, file_id)
     target_path = move_to_archive(file_path, target_path)
+    # Relativ zu archive_root speichern, damit ein Umbenennen/Verschieben des
+    # Archiv-Root-Ordners bereits importierte Dateien nicht verwaist.
+    relative_archive_path = target_path.relative_to(archive_root)
     file_record = repo.create_file(
         db,
         id=file_id,
         sha256=sha256,
         original_filename=file_path.name,
-        archive_path=str(target_path),
+        archive_path=str(relative_archive_path),
         mime_type=mime_type,
         content_type=content_type,
         file_size=file_size,
@@ -109,7 +131,7 @@ def import_file(file_path: Path, db: Session, archive_root: Path) -> dict:
         "status": "imported",
         "file_id": file_record.id,
         "filename": file_path.name,
-        "archive_path": str(target_path),
+        "archive_path": str(relative_archive_path),
         "mime_type": mime_type,
         "content_type": content_type,
     }
@@ -131,7 +153,7 @@ def process_file(file_id: str, db: Session) -> None:
     repo.update_file_status(db, file_id, "processing")
 
     try:
-        file_path = Path(file_record.archive_path)
+        file_path = resolve_archive_path(file_record.archive_path, cfg.paths.archive_root)
         if not file_path.exists():
             raise FileNotFoundError(f"Archivdatei nicht gefunden: {file_path}")
 
@@ -174,7 +196,7 @@ def process_file(file_id: str, db: Session) -> None:
                         "source_path": file_record.archive_path,
                         "file_name": file_record.original_filename,
                         "content_type": file_record.content_type or "other",
-                        "created_year": datetime.now(timezone.utc).year,
+                        "created_year": datetime.now().year,
                         "page": cr.get("page") or 0,
                     }
                     for cr in chunk_records
@@ -236,7 +258,7 @@ def process_file(file_id: str, db: Session) -> None:
                                 "content_type": "images",
                                 "chunk_type": "faces",
                                 "face_count": face_count,
-                                "created_year": datetime.now(timezone.utc).year,
+                                "created_year": datetime.now().year,
                                 "page": 0,
                             }],
                         )
@@ -245,10 +267,11 @@ def process_file(file_id: str, db: Session) -> None:
             except Exception as face_exc:
                 logger.warning("Gesichtserkennung fehlgeschlagen für %s: %s", file_record.original_filename, face_exc)
 
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now().isoformat()
 
-        # Thumbnail für Bilder generieren
-        if file_record.content_type == "images":
+        # Thumbnail für Bilder und PDFs generieren (Vorschau in Timeline-/Listenansicht)
+        is_pdf = file_path.suffix.lower() == ".pdf"
+        if file_record.content_type == "images" or is_pdf:
             try:
                 from app.services import thumbnail_service
                 rel_path = thumbnail_service.generate_and_store(file_path, file_id, cfg.paths.data_dir)
@@ -258,6 +281,7 @@ def process_file(file_id: str, db: Session) -> None:
                 logger.warning("Thumbnail-Erstellung fehlgeschlagen für %s: %s", file_record.original_filename, thumb_exc)
 
         # KI-Zusammenfassung generieren und speichern
+        ai_summary = None
         try:
             from app.services import summarization_service
             sidecar_data_for_summary = None
@@ -297,6 +321,36 @@ def process_file(file_id: str, db: Session) -> None:
         except Exception as sum_exc:
             logger.warning("KI-Zusammenfassung fehlgeschlagen für %s: %s", file_record.original_filename, sum_exc)
 
+        # Tags (z.B. Rechnung, Arzt, Homöopathie) per KI ermitteln und zuweisen
+        if cfg.processing.enable_tag_suggestion:
+            try:
+                from app.services import tag_service
+                context_text = ai_summary or (result.chunks[0].text if result.chunks else "")
+                assigned = tag_service.suggest_and_assign_tags(
+                    db, file_id, context_text, is_image=file_record.content_type == "images"
+                )
+                if assigned:
+                    logger.info("Tags %s zugewiesen für %s", assigned, file_record.original_filename)
+            except Exception as tag_exc:
+                logger.warning(
+                    "Tag-Vorschlag fehlgeschlagen für %s: %s",
+                    file_record.original_filename, tag_exc,
+                )
+
+        # Inhaltliches Erstellungsdatum fuer die Timeline bestimmen:
+        # Bilder liefern es aus EXIF (result.created_at), fuer Dokumente wird ein
+        # beschriftetes Belegdatum (z.B. Rechnungsdatum) aus dem Text extrahiert.
+        created_at = result.created_at
+        if not created_at and file_record.content_type == "documents":
+            try:
+                from app.services import document_date_service
+                doc_text = "\n".join(c.text for c in result.chunks[:5]) if result.chunks else ""
+                created_at = document_date_service.extract_document_date(doc_text)
+            except Exception as date_exc:
+                logger.warning("Datumserkennung fehlgeschlagen für %s: %s", file_record.original_filename, date_exc)
+        if created_at:
+            repo.update_file_created_at(db, file_id, created_at)
+
         repo.update_file_status(
             db,
             file_id,
@@ -305,13 +359,125 @@ def process_file(file_id: str, db: Session) -> None:
             sidecar_json_path=result.sidecar_json_path,
             sidecar_md_path=result.sidecar_md_path,
         )
+        if result.sharpness_score is not None or result.perceptual_hash is not None:
+            repo.update_file_image_metrics(
+                db, file_id, result.sharpness_score, result.perceptual_hash
+            )
         repo.finish_job(db, job.id, success=True, log=f"{len(result.chunks)} Chunks erstellt")
+        # Neue Gesichter/GPS-Daten/Hashes koennen entstanden sein: naechsten Cluster-Job-Tick anstossen.
+        from app.services.scheduler_service import mark_dirty
+        mark_dirty(db)
         logger.info("Datei verarbeitet: %s (%d Chunks)", file_record.original_filename, len(result.chunks))
 
     except Exception as exc:
         logger.error("Fehler bei Verarbeitung von %s: %s", file_record.original_filename, exc)
         repo.update_file_status(db, file_id, status="failed", error_message=str(exc))
         repo.finish_job(db, job.id, success=False, error_message=str(exc))
+
+
+def _reprocess_after_restart(file_id: str) -> None:
+    """Verarbeitet eine Datei erneut in einem eigenen DB-Thread (nach App-Neustart)."""
+    from app.db.database import _SessionLocal
+    if _SessionLocal is None:
+        return
+    # Semaphore VOR dem Öffnen der DB-Session erwerben (siehe _get_processing_semaphore).
+    with _get_processing_semaphore():
+        db = _SessionLocal()
+        try:
+            process_file(file_id, db)
+        except Exception:
+            logger.exception("Erneute Verarbeitung von Datei %s nach Neustart fehlgeschlagen.", file_id)
+        finally:
+            db.close()
+
+
+def _recovery_worker(file_ids: list[str]) -> None:
+    """Arbeitet unterbrochene Dateien nach einem Neustart NACHEINANDER ab.
+
+    Bewusst sequentiell (nicht ein Thread pro Datei), damit die Wiederaufnahme
+    nicht alle Slots des Verarbeitungs-Semaphors belegt und Ollama saettigt -
+    interaktive Aktionen (z.B. manuelles "Neu verarbeiten") bleiben so moeglich.
+    """
+    for file_id in file_ids:
+        _reprocess_after_restart(file_id)
+    logger.info("Wiederaufnahme nach Neustart abgeschlossen (%d Datei(en)).", len(file_ids))
+
+
+def _resume_full_rebuild_worker() -> None:
+    """Setzt einen beim letzten App-Neustart unterbrochenen vollständigen
+    Rebuild (Modus B) fort, statt ihn stillschweigend als fehlgeschlagen
+    stehen zu lassen.
+    """
+    from app.config import get_config
+    from app.db.database import _SessionLocal
+    from app.services import reindex_service
+    if _SessionLocal is None:
+        return
+    cfg = get_config()
+    db = _SessionLocal()
+    try:
+        reindex_service.full_rebuild(db, cfg.paths.archive_root, resume=True)
+    except Exception:
+        logger.exception("Fortsetzung des unterbrochenen vollständigen Rebuilds fehlgeschlagen.")
+    finally:
+        db.close()
+
+
+def requeue_interrupted_jobs() -> int:
+    """Beim App-Start aufrufen: durch einen Absturz unterbrochene Verarbeitung
+    erkennen und erneut anstossen.
+
+    - Alle noch offenen Jobs (Status 'running'/'queued') werden als unterbrochen
+      markiert, damit die Jobliste nicht dauerhaft auf "Running" haengen bleibt.
+    - War darunter ein unterbrochener vollständiger Rebuild (Modus B), wird
+      dieser in einem Hintergrund-Worker fortgesetzt (bereits fertig verarbeitete
+      Dateien werden uebersprungen, die zuletzt evtl. nur teilweise verarbeitete
+      Datei wird zur Sicherheit erneut indexiert).
+    - Andernfalls werden einzelne Dateien, die im Status 'processing'/'queued'
+      stecken geblieben sind, in EINEM sequentiellen Hintergrund-Worker erneut
+      verarbeitet.
+
+    Gibt die Anzahl erneut eingeplanter Dateien zurueck.
+    """
+    from app.db.database import _SessionLocal
+    if _SessionLocal is None:
+        return 0
+
+    db = _SessionLocal()
+    file_ids: list[str] = []
+    try:
+        # 1) Haengengebliebene Jobs abschliessen, damit die UI nicht ewig "Running" zeigt.
+        for job in repo.list_unfinished_jobs(db):
+            repo.finish_job(
+                db,
+                job.id,
+                success=False,
+                error_message="Durch App-Neustart unterbrochen; Verarbeitung wird erneut gestartet.",
+            )
+        # 2) Dateien einsammeln, die mitten in der Verarbeitung unterbrochen wurden.
+        file_ids = repo.list_file_ids_by_status(db, ["processing", "queued"])
+        # Marker aus full_rebuild(): bleibt bei hartem Abbruch stehen (wird nur bei
+        # normalem Abschluss geloescht), unabhaengig vom Job-Status.
+        interrupted_full_rebuild = bool(repo.get_setting(db, "reindex_full_in_progress"))
+    finally:
+        db.close()
+
+    if interrupted_full_rebuild:
+        # Der fortgesetzte Rebuild scannt ohnehin das gesamte Archiv erneut und
+        # deckt damit auch die oben eingesammelten file_ids mit ab.
+        logger.info("Unterbrochener vollständiger Rebuild (Modus B) erkannt - wird fortgesetzt.")
+        threading.Thread(target=_resume_full_rebuild_worker, daemon=True).start()
+        return len(file_ids)
+
+    if not file_ids:
+        return 0
+
+    logger.info(
+        "%d unterbrochene Datei(en) werden nach dem Neustart erneut verarbeitet.",
+        len(file_ids),
+    )
+    threading.Thread(target=_recovery_worker, args=(file_ids,), daemon=True).start()
+    return len(file_ids)
 
 
 def _collection_for_content_type(content_type: str | None) -> str:

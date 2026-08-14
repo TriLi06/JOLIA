@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import io
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.database import get_session
 from app.db import repositories as repo
-from app.services import rag_service
+from app.services import archive_service, rag_service
 
 router = APIRouter()
 
@@ -39,12 +39,13 @@ def search(
     q: str,
     n: int = 10,
     content_type: str | None = None,
+    tags: list[str] | None = Query(None),
     db: Session = Depends(get_session),
 ):
     if not q.strip():
         return SearchResponse(query=q, results=[], total=0)
 
-    raw_results = rag_service.search(q, n_results=n, content_type=content_type)
+    raw_results = rag_service.search(q, n_results=n, content_type=content_type, tags=tags)
 
     # Datei-Metadaten (summary, thumbnail) aus DB nachladen
     file_ids = list({r.get("metadata", {}).get("file_id", "") for r in raw_results if r.get("metadata", {}).get("file_id")})
@@ -57,6 +58,12 @@ def search(
 
     results = []
     for r in raw_results:
+        # Score-0-Filter nur für Text-Embedding-Collections: dort ist "score" direkt
+        # vergleichbar (Distanz >= 1 -> nicht relevant). Bei CLIP/CLAP-Cross-Modal-
+        # Treffern (image_embeddings/audio_embeddings) liegen Rohscores systembedingt
+        # niedriger und ein geklammertes 0.0 bedeutet dort NICHT "irrelevant".
+        if r["score"] <= 0.0 and r.get("collection") not in ("image_embeddings", "audio_embeddings"):
+            continue
         fid = r.get("metadata", {}).get("file_id", "")
         f = file_map.get(fid)
         ct = r.get("metadata", {}).get("content_type", "")
@@ -196,14 +203,39 @@ class RenameFaceClusterRequest(BaseModel):
 def rename_face_cluster(cluster_id: str, body: RenameFaceClusterRequest, db: Session = Depends(get_session)):
     """Weist einem Personen-Cluster einen Namen zu (z.B. 'Max Mustermann')."""
     from app.db.models import PersonCluster
-    from datetime import datetime, timezone
+    from datetime import datetime
     cluster = db.get(PersonCluster, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster nicht gefunden")
     cluster.label = body.label.strip()
-    cluster.updated_at = datetime.now(timezone.utc).isoformat()
+    cluster.updated_at = datetime.now().isoformat()
     db.commit()
     return {"id": cluster_id, "label": cluster.label}
+
+
+class MergeFaceClustersRequest(BaseModel):
+    cluster_ids: list[str]
+    label: str
+
+
+@router.post("/faces/merge")
+def merge_face_clusters(body: MergeFaceClustersRequest, db: Session = Depends(get_session)):
+    """Führt mehrere Personen-Cluster unter einem gemeinsamen Namen zusammen.
+
+    Es werden keine Encodings gelöscht - alle angegebenen Cluster erhalten
+    denselben Namen und erscheinen in der Darstellung als eine Person. Die
+    Verknüpfung bleibt auch nach erneutem Clustering bestehen, da der Name je
+    Cluster vererbt wird und die Anzeige nach Namen gruppiert.
+    """
+    from app.services.face_service import set_label_for_clusters
+
+    label = (body.label or "").strip()
+    if not label:
+        raise HTTPException(status_code=400, detail="Name darf nicht leer sein")
+    if len(body.cluster_ids) < 2:
+        raise HTTPException(status_code=400, detail="Mindestens zwei Cluster auswählen")
+    updated = set_label_for_clusters(db, body.cluster_ids, label)
+    return {"merged": updated, "label": label}
 
 
 @router.get("/faces/{cluster_id}/thumbnail")
@@ -226,15 +258,23 @@ def face_cluster_thumbnail(cluster_id: str, size: int = 96, db: Session = Depend
         raise HTTPException(status_code=404, detail="Quelldatei nicht gefunden")
 
     cfg = get_config()
-    archive_path = Path(file_record.archive_path)
-    if not archive_path.is_absolute():
-        archive_path = cfg.paths.archive_root / archive_path
+    archive_path = archive_service.resolve_archive_path(file_record.archive_path, cfg.paths.archive_root)
     if not archive_path.exists():
         raise HTTPException(status_code=404, detail="Bilddatei nicht gefunden")
 
     try:
         from PIL import Image
         img = Image.open(str(archive_path)).convert("RGB")
+
+        # bbox_* wurden auf einer verkleinerten Kopie (max. 1024px, siehe
+        # face_service.detect_and_store_faces) erkannt. Für den Crop hier
+        # muss dasselbe Downscaling angewendet werden, sonst landen die
+        # Koordinaten in einem viel zu kleinen Ausschnitt des Originalbilds.
+        max_dim = 1024
+        if max(img.size) > max_dim:
+            ratio = max_dim / max(img.size)
+            img = img.resize((int(img.width * ratio), int(img.height * ratio)), Image.LANCZOS)
+
         top, right, bottom, left = face.bbox_top or 0, face.bbox_right or img.width, face.bbox_bottom or img.height, face.bbox_left or 0
 
         # Polsterung hinzufügen (25 % der Gesichtsgröße)
@@ -272,6 +312,92 @@ def similar_images_by_id(file_id: str, n: int = 10):
         for r in results_raw
     ]
     return ImageSimilarityResponse(results=results, total=len(results))
+
+
+# ---------------------------------------------------------------------------
+# Musik-/Audio-Ähnlichkeitssuche (CLAP)
+# ---------------------------------------------------------------------------
+
+class AudioSimilarityResult(BaseModel):
+    file_id: str
+    file_name: str
+    source_path: str
+    score: float
+
+
+class AudioSimilarityResponse(BaseModel):
+    results: list[AudioSimilarityResult]
+    total: int
+
+
+@router.post("/audio-similarity", response_model=AudioSimilarityResponse)
+async def audio_similarity_search(
+    file: UploadFile = File(...),
+    n: int = 10,
+):
+    """
+    Lädt eine Audiodatei hoch und sucht ähnliche Musik/Audio via CLAP-Embedding.
+    Setzt voraus, dass enable_clap_embeddings=true und Audiodateien bereits indexiert sind.
+    """
+    from app.services.clap_service import embed_audio, is_available
+    from app.services import chroma_service
+    from app.config import get_config
+    import tempfile
+    from pathlib import Path
+
+    if not is_available():
+        raise HTTPException(
+            status_code=501,
+            detail="CLAP nicht verfügbar. Bitte 'pip install transformers librosa' installieren.",
+        )
+
+    cfg = get_config()
+    content = await file.read()
+    with tempfile.NamedTemporaryFile(suffix=Path(file.filename or "q.mp3").suffix, delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+
+    try:
+        clap_vec = embed_audio(
+            tmp_path,
+            model_name=cfg.models.clap_model,
+            max_seconds=cfg.processing.clap_max_audio_seconds,
+        )
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    raw = chroma_service.query_collection(
+        collection_name="audio_embeddings",
+        query_embedding=clap_vec,
+        n_results=n,
+    )
+
+    results = [
+        AudioSimilarityResult(
+            file_id=r.get("metadata", {}).get("file_id", ""),
+            file_name=r.get("metadata", {}).get("file_name", ""),
+            source_path=r.get("metadata", {}).get("source_path", ""),
+            score=round(r["score"], 3),
+        )
+        for r in raw
+    ]
+    return AudioSimilarityResponse(results=results, total=len(results))
+
+
+@router.get("/similar-audio/{file_id}", response_model=AudioSimilarityResponse)
+def similar_audio_by_id(file_id: str, n: int = 10):
+    """Findet Audio-/Musikdateien ähnlich zu einer bereits indexierten Datei (via CLAP, nach file_id)."""
+    results_raw = rag_service.search_similar_audio(file_id, n_results=n)
+    results = [
+        AudioSimilarityResult(
+            file_id=r.get("metadata", {}).get("file_id", ""),
+            file_name=r.get("metadata", {}).get("file_name", ""),
+            source_path=r.get("metadata", {}).get("source_path", ""),
+            score=round(r["score"], 3),
+        )
+        for r in results_raw
+    ]
+    return AudioSimilarityResponse(results=results, total=len(results))
 
 
 # ---------------------------------------------------------------------------

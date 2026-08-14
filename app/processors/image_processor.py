@@ -21,6 +21,8 @@ class ImageProcessor(BaseProcessor):
 
         width, height = img.size
         exif_data = self._extract_exif(img)
+        sharpness_score = self._compute_sharpness(img)
+        perceptual_hash = self._compute_phash(img)
         ocr_text = ""
         ocr_confidence = 100
         vision_description = ""
@@ -29,9 +31,10 @@ class ImageProcessor(BaseProcessor):
         if config.processing.enable_image_ocr:
             if vision_backend == "ollama":
                 vision_timeout = getattr(config.models, "vision_ollama_timeout", config.models.ollama_timeout)
+                context_lines = self._build_vision_context(exif_data)
                 vision_description, ocr_text, ocr_confidence = self._run_vision_ollama_structured(
                     file_path, config.models.vision_ollama_model, config.models.ollama_base_url,
-                    vision_timeout,
+                    vision_timeout, context_lines=context_lines,
                 )
                 # Fallback: Wenn das Vision-Modell nichts liefert (Timeout, Modell nicht
                 # geladen, CPU-Limit), klassische Tesseract-OCR nutzen, damit zumindest
@@ -56,6 +59,8 @@ class ImageProcessor(BaseProcessor):
         }
         if ocr_confidence:
             metadata["OCR-Konfidenz"] = f"{ocr_confidence}%"
+        if sharpness_score is not None:
+            metadata["Bildschärfe"] = f"{'scharf' if sharpness_score >= 100 else 'unscharf'} ({sharpness_score:.1f})"
         metadata.update(exif_data)
 
         # --- Suchtext aus allen Quellen aufbauen ---
@@ -93,6 +98,9 @@ class ImageProcessor(BaseProcessor):
             search_parts.append(f"Bildbeschreibung: {vision_description}")
         if ocr_text.strip():
             search_parts.append(f"Erkannter Text: {ocr_text}")
+        if sharpness_score is not None:
+            quality = "scharf" if sharpness_score >= 100 else "unscharf/verwackelt"
+            search_parts.append(f"Bildqualität: {quality}")
 
         search_text = "\n".join(search_parts)
 
@@ -148,6 +156,14 @@ class ImageProcessor(BaseProcessor):
         )
         md_path = sidecar_service.write_md_sidecar(file_path, md_content)
 
+        # Aufnahmedatum aus EXIF als inhaltliches Erstellungsdatum (Timeline)
+        from app.services import document_date_service
+        capture_iso = (
+            document_date_service.parse_exif_datetime(exif_data.get("DateTimeOriginal"))
+            or document_date_service.parse_exif_datetime(exif_data.get("DateTimeDigitized"))
+            or document_date_service.parse_exif_datetime(exif_data.get("DateTime"))
+        )
+
         # Phase B: CLIP-Embedding wenn aktiviert
         if getattr(config.processing, "enable_clip_embeddings", False):
             self._store_clip_embedding(file_path, file_record, config, vision_description)
@@ -159,6 +175,9 @@ class ImageProcessor(BaseProcessor):
             needs_review=needs_review,
             sidecar_json_path=str(json_path),
             sidecar_md_path=str(md_path),
+            sharpness_score=sharpness_score,
+            perceptual_hash=perceptual_hash,
+            created_at=capture_iso,
         )
 
     def _store_clip_embedding(self, file_path: Path, file_record, config, vision_description: str = "") -> None:
@@ -207,6 +226,39 @@ class ImageProcessor(BaseProcessor):
             except ImportError:
                 logger.warning("pillow-heif nicht installiert, HEIC evtl. nicht lesbar.")
         return Image.open(str(file_path))
+
+    def _compute_sharpness(self, img) -> float | None:
+        """Laplacian-Varianz als Schärfemetrik (höher = schärfer), fuer Best-Aufnahme-Auswahl."""
+        try:
+            import cv2
+            import numpy as np
+
+            gray = np.array(img.convert("L"))
+            return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        except Exception as exc:
+            logger.debug("Schärfeberechnung fehlgeschlagen: %s", exc)
+            return None
+
+    def _compute_phash(self, img) -> str | None:
+        """Perceptual Hash fuer Duplikat-/Serienerkennung ähnlicher Aufnahmen."""
+        try:
+            import imagehash
+            return str(imagehash.phash(img))
+        except Exception as exc:
+            logger.debug("Perceptual-Hash-Berechnung fehlgeschlagen: %s", exc)
+            return None
+
+    def _build_vision_context(self, exif_data: dict) -> list[str]:
+        """Baut Kontextzeilen (Aufnahmedatum, Kamera, GPS) fuer den Vision-Prompt aus EXIF."""
+        lines: list[str] = []
+        capture_date = exif_data.get("DateTimeOriginal") or exif_data.get("DateTime")
+        if capture_date:
+            lines.append(f"Aufnahmedatum: {capture_date}")
+        if exif_data.get("GPS"):
+            lines.append(f"Aufnahmeort (GPS): {exif_data['GPS']}")
+        if exif_data.get("Make") or exif_data.get("Model"):
+            lines.append(f"Kamera: {exif_data.get('Make', '')} {exif_data.get('Model', '')}".strip())
+        return lines
 
     def _extract_exif(self, img) -> dict:
         exif_data: dict = {}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse as FastAPIFileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import get_config
 from app.db.database import get_session
 from app.db import repositories as repo
-from app.services import ingestion_service
+from app.services import archive_service, ingestion_service
 
 router = APIRouter()
 
@@ -21,11 +21,17 @@ class FileResponse(BaseModel):
     archive_path: str
     mime_type: str | None
     content_type: str | None
+    tags: list[str] = []
     file_size: int | None
     status: str
     imported_at: str
     processed_at: str | None
     error_message: str | None
+    created_at: str | None = None
+    ai_summary: str | None = None
+    thumbnail_path: str | None = None
+    sharpness_score: float | None = None
+    best_file_id: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -40,12 +46,25 @@ class FileListResponse(BaseModel):
 @router.get("", response_model=FileListResponse)
 def list_files(
     content_type: str | None = None,
+    tags: list[str] | None = Query(None),
     status: str | None = None,
+    q: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_session),
 ):
-    items, total = repo.list_files(db, content_type=content_type, status=status, limit=limit, offset=offset)
+    if q or date_from or date_to:
+        items, total = repo.search_files(
+            db, q_text=q, content_type=content_type, tags=tags, status=status,
+            date_from=date_from, date_to=date_to, limit=limit, offset=offset,
+        )
+    else:
+        items, total = repo.list_files(
+            db, content_type=content_type, tags=tags, status=status,
+            limit=limit, offset=offset,
+        )
     return FileListResponse(
         items=[FileResponse.model_validate(f) for f in items],
         total=total,
@@ -54,12 +73,78 @@ def list_files(
     )
 
 
+@router.get("/timeline")
+def list_files_timeline(
+    content_type: str | None = None,
+    tags: list[str] | None = Query(None),
+    status: str | None = None,
+    q: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: Session = Depends(get_session),
+):
+    """Liefert Dateien nach Kalendertag gruppiert (Aufnahme-/Importdatum) fuer die Timeline-Ansicht."""
+    items = repo.list_files_by_day(
+        db, q_text=q, content_type=content_type, tags=tags, status=status,
+        date_from=date_from, date_to=date_to,
+    )
+    days: dict[str, list] = {}
+    for f in items:
+        raw = f.created_at or f.imported_at or ""
+        day = raw[:10] if raw else "unbekannt"
+        days.setdefault(day, []).append(FileResponse.model_validate(f).model_dump())
+    ordered = [{"date": day, "files": files} for day, files in sorted(days.items(), reverse=True)]
+    return {"days": ordered}
+
+
+@router.get("/timeline/days")
+def list_files_timeline_days(
+    content_type: str | None = None,
+    tags: list[str] | None = Query(None),
+    status: str | None = None,
+    q: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: Session = Depends(get_session),
+):
+    """Liefert nur die Kalendertage mit Anzahl (guenstig) - Basis fuer das lazy-ladende Timeline-Scrolling."""
+    days = repo.count_files_by_day(
+        db, q_text=q, content_type=content_type, tags=tags, status=status,
+        date_from=date_from, date_to=date_to,
+    )
+    total = sum(d["count"] for d in days)
+    return {"days": days, "total": total}
+
+
+@router.get("/timeline/day")
+def list_files_timeline_day(
+    date: str = Query(...),
+    content_type: str | None = None,
+    tags: list[str] | None = Query(None),
+    status: str | None = None,
+    q: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: Session = Depends(get_session),
+):
+    """Liefert die Dateien eines einzelnen Kalendertags - wird beim Timeline-Scrollen bedarfsgesteuert geladen."""
+    items = repo.list_files_for_day(
+        db, date, q_text=q, content_type=content_type, tags=tags, status=status,
+        date_from=date_from, date_to=date_to,
+    )
+    return {
+        "date": date,
+        "files": [FileResponse.model_validate(f).model_dump() for f in items],
+    }
+
+
 @router.get("/{file_id}/download")
 def download_file(file_id: str, db: Session = Depends(get_session)):
     f = repo.get_file_by_id(db, file_id)
     if not f:
         raise HTTPException(status_code=404, detail="Datei nicht gefunden")
-    archive_path = Path(f.archive_path)
+    cfg = get_config()
+    archive_path = archive_service.resolve_archive_path(f.archive_path, cfg.paths.archive_root)
     if not archive_path.exists():
         raise HTTPException(status_code=404, detail="Datei nicht im Archiv vorhanden")
     return FastAPIFileResponse(
@@ -133,9 +218,9 @@ def update_review_text(
     if not corrected_text:
         raise HTTPException(status_code=400, detail="Kein Text übermittelt.")
 
-    from pathlib import Path
     from app.services import sidecar_service
-    archive_path = Path(f.archive_path)
+    cfg = get_config()
+    archive_path = archive_service.resolve_archive_path(f.archive_path, cfg.paths.archive_root)
 
     # Korrigierten Text in MD-Sidecar speichern
     md_content = sidecar_service.build_image_md(
@@ -186,7 +271,7 @@ def update_user_description(
 ):
     """Speichert eine manuelle Beschreibung und indexiert sie als durchsuchbaren Chunk."""
     import uuid as _uuid
-    from datetime import datetime, timezone
+    from datetime import datetime
     from app.services import chroma_service, embedding_service
 
     f = repo.get_file_by_id(db, file_id)
@@ -249,7 +334,7 @@ def update_user_description(
                 "content_type": f.content_type or "",
                 "chunk_type": "user_description",
                 "page": 0,
-                "created_year": datetime.now(timezone.utc).year,
+                "created_year": datetime.now().year,
             }],
         )
 
@@ -267,16 +352,55 @@ def update_user_description(
     return {"message": "Beschreibung gespeichert.", "file_id": file_id}
 
 
+class FileTagCreate(BaseModel):
+    name: str
+
+
+@router.get("/{file_id}/tags")
+def get_file_tags(file_id: str, db: Session = Depends(get_session)):
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    from app.services import tag_service
+    return {"items": tag_service.get_file_tags(db, file_id)}
+
+
+@router.post("/{file_id}/tags")
+def add_file_tag(file_id: str, payload: FileTagCreate, db: Session = Depends(get_session)):
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    from app.services import tag_service
+    try:
+        name = tag_service.assign_tag(db, file_id, payload.name, added_by="user")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"message": "Tag hinzugefügt.", "file_id": file_id, "name": name}
+
+
+@router.delete("/{file_id}/tags/{name}")
+def remove_file_tag(file_id: str, name: str, db: Session = Depends(get_session)):
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    from app.services import tag_service
+    tag_service.unassign_tag(db, file_id, name)
+    return {"message": "Tag entfernt.", "file_id": file_id, "name": name}
+
+
 @router.get("/{file_id}/thumbnail")
 def get_thumbnail(file_id: str, db: Session = Depends(get_session)):
-    """Liefert eine Thumbnail-Vorschau für Bilddateien (aus Cache oder on-demand)."""
+    """Liefert eine Thumbnail-Vorschau für Bild- und PDF-Dateien (aus Cache oder on-demand)."""
     from fastapi.responses import FileResponse as FastAPIFileResponse, Response
     import io
     f = repo.get_file_by_id(db, file_id)
     if not f:
         raise HTTPException(status_code=404, detail="Datei nicht gefunden")
-    if not (f.content_type == "images" or (f.mime_type or "").startswith("image/")):
-        raise HTTPException(status_code=400, detail="Keine Bilddatei")
+
+    is_image = f.content_type == "images" or (f.mime_type or "").startswith("image/")
+    is_pdf = (f.mime_type or "") == "application/pdf" or Path(f.archive_path).suffix.lower() == ".pdf"
+    if not is_image and not is_pdf and not f.thumbnail_path:
+        raise HTTPException(status_code=400, detail="Keine Vorschau für diesen Dateityp verfügbar")
 
     cfg = get_config()
 
@@ -286,8 +410,8 @@ def get_thumbnail(file_id: str, db: Session = Depends(get_session)):
         if thumb_abs.exists():
             return FastAPIFileResponse(str(thumb_abs), media_type="image/jpeg")
 
-    # Thumbnail on-demand generieren und cachen
-    archive_path = Path(f.archive_path)
+    # Thumbnail on-demand generieren und cachen (Bild und PDF)
+    archive_path = archive_service.resolve_archive_path(f.archive_path, cfg.paths.archive_root)
     if not archive_path.exists():
         raise HTTPException(status_code=404, detail="Datei nicht im Archiv vorhanden")
 
@@ -299,7 +423,10 @@ def get_thumbnail(file_id: str, db: Session = Depends(get_session)):
             thumb_abs = cfg.paths.data_dir / rel_path
             return FastAPIFileResponse(str(thumb_abs), media_type="image/jpeg")
 
-        # Letzter Fallback: on-demand ohne Speicherung
+        if not is_image:
+            raise HTTPException(status_code=404, detail="Vorschau konnte nicht erzeugt werden")
+
+        # Letzter Fallback nur für Bilder: on-demand ohne Speicherung
         from PIL import Image
         img = Image.open(str(archive_path))
         img.thumbnail((400, 400))
@@ -309,6 +436,8 @@ def get_thumbnail(file_id: str, db: Session = Depends(get_session)):
         img.save(buf, format="JPEG")
         buf.seek(0)
         return Response(content=buf.read(), media_type="image/jpeg")
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Thumbnail-Fehler: {exc}")
 
@@ -317,11 +446,98 @@ def _process_in_background(file_id: str) -> None:
     from app.db.database import _SessionLocal
     if _SessionLocal is None:
         return
-    db = _SessionLocal()
-    try:
-        ingestion_service.process_file(file_id, db)
-    finally:
-        db.close()
+    # Semaphore VOR dem Öffnen der DB-Session erwerben, damit nicht mehr Sessions
+    # gleichzeitig offen sind als der Connection-Pool erlaubt (siehe ingestion_service).
+    with ingestion_service._get_processing_semaphore():
+        db = _SessionLocal()
+        try:
+            ingestion_service.process_file(file_id, db)
+        finally:
+            db.close()
+
+
+# ---------------------------------------------------------------------------
+# Soft-Delete & Duplikat-Gruppen
+# ---------------------------------------------------------------------------
+
+@router.post("/{file_id}/delete")
+def delete_file(file_id: str, db: Session = Depends(get_session)):
+    """Markiert eine Datei (jeden Typs) als geloescht - kein echtes Loeschen, nur Statuswechsel."""
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    repo.soft_delete_file(db, file_id)
+    return {"message": "Datei als gelöscht markiert.", "file_id": file_id}
+
+
+@router.post("/{file_id}/restore")
+def restore_file(file_id: str, db: Session = Depends(get_session)):
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    repo.restore_file(db, file_id)
+    return {"message": "Datei wiederhergestellt.", "file_id": file_id}
+
+
+@router.get("/{file_id}/duplicates")
+def get_duplicates(file_id: str, db: Session = Depends(get_session)):
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    group = repo.get_duplicate_group(db, file_id)
+    return {
+        "file_id": file_id,
+        "members": [
+            {
+                "id": m.id,
+                "original_filename": m.original_filename,
+                "status": m.status,
+                "sharpness_score": m.sharpness_score,
+                "is_best": m.best_file_id is None,
+                "thumbnail_url": f"/api/files/{m.id}/thumbnail",
+            }
+            for m in group
+        ],
+    }
+
+
+@router.post("/{file_id}/mark-best")
+def mark_best(file_id: str, db: Session = Depends(get_session)):
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    group = repo.get_duplicate_group(db, file_id)
+    if len(group) < 2:
+        raise HTTPException(status_code=400, detail="Datei gehört zu keiner Serie.")
+    other_ids = [m.id for m in group if m.id != file_id]
+    repo.set_best_file(db, file_id, other_ids, manually_set=True)
+    return {"message": "Als beste Aufnahme markiert.", "file_id": file_id}
+
+
+@router.post("/{file_id}/mark-group-deleted")
+def mark_group_deleted(file_id: str, db: Session = Depends(get_session)):
+    """Markiert alle ANDEREN Mitglieder der Duplikat-Gruppe (nicht die beste Aufnahme) als geloescht."""
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    group = repo.get_duplicate_group(db, file_id)
+    best = next((m for m in group if m.best_file_id is None), f)
+    other_ids = [m.id for m in group if m.id != best.id]
+    count = repo.mark_group_deleted_except_best(db, best.id, other_ids)
+    return {"message": f"{count} Datei(en) als gelöscht markiert.", "best_file_id": best.id}
+
+
+@router.post("/duplicates/rebuild")
+def rebuild_duplicates(db: Session = Depends(get_session)):
+    """Manueller Sofort-Trigger der Duplikat-/Serienerkennung (laeuft sonst periodisch im Scheduler)."""
+    from app.services import duplicate_service
+    cfg = get_config()
+    result = duplicate_service.rebuild_duplicate_groups(
+        db,
+        hash_threshold=cfg.processing.duplicate_hash_threshold,
+        time_window_seconds=cfg.processing.duplicate_time_window_seconds,
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +586,20 @@ def get_similar_files(file_id: str, n: int = 10, db: Session = Depends(get_sessi
     if not f:
         raise HTTPException(status_code=404, detail="Datei nicht gefunden")
     results = rag_service.search_similar_by_file(file_id, n_results=n)
+    items = _rag_results_to_similar(results, db)
+    return SimilarResponse(results=items, total=len(items))
+
+
+@router.get("/{file_id}/similar-audio", response_model=SimilarResponse)
+def get_similar_audio(file_id: str, n: int = 10, db: Session = Depends(get_session)):
+    """Findet ähnliche Musik/Audio via CLAP-Embedding."""
+    from app.services import rag_service
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    if f.content_type != "audio":
+        raise HTTPException(status_code=400, detail="Nur für Audiodateien verfügbar")
+    results = rag_service.search_similar_audio(file_id, n_results=n)
     items = _rag_results_to_similar(results, db)
     return SimilarResponse(results=items, total=len(items))
 

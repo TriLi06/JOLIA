@@ -2,7 +2,7 @@ import api from './api';
 import { ScannedPage } from '../store/scanStore';
 
 /**
- * Lädt alle gescannten Seiten als Multipart-Upload zum DocStoreAI-Backend hoch.
+ * Lädt alle gescannten Seiten als Multipart-Upload zum JOLIA Docs-Backend hoch.
  */
 export async function uploadSession(
   guid: string,

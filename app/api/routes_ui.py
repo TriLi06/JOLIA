@@ -3,12 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.db.database import get_session
 from app.db import repositories as repo
+from app.config import get_config
+from app.services import archive_service
 
 router = APIRouter()
 
@@ -17,46 +19,9 @@ templates = Jinja2Templates(directory=str(_templates_dir))
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request, db: Session = Depends(get_session)):
-    status_counts = repo.count_files_by_status(db)
-    recent_files = repo.get_recent_files(db, limit=10)
-    last_backup = repo.get_last_backup(db)
-
-    from app.config import get_config
-    from app.services import chroma_service
-    import json
-    cfg = get_config()
-    chroma_counts = {}
-    for name in chroma_service.COLLECTIONS.values():
-        try:
-            chroma_counts[name] = chroma_service.get_collection_count(name)
-        except Exception:
-            chroma_counts[name] = 0
-
-    # Index-Versionswarnung
-    model_mismatch_warning = None
-    index_meta_str = repo.get_setting(db, "index_meta")
-    if index_meta_str:
-        index_meta = json.loads(index_meta_str)
-        indexed_model = index_meta.get("embedding_model", "")
-        if indexed_model and indexed_model != cfg.models.embedding_model:
-            model_mismatch_warning = (
-                f"Konfiguriertes Modell '{cfg.models.embedding_model}' unterscheidet sich vom "
-                f"indizierten Modell '{indexed_model}'. Bitte Reindizierung durchführen."
-            )
-
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        {
-            "status_counts": status_counts,
-            "recent_files": recent_files,
-            "last_backup": last_backup,
-            "chroma_counts": chroma_counts,
-            "inbox_path": str(cfg.paths.inbox),
-            "model_mismatch_warning": model_mismatch_warning,
-        },
-    )
+def dashboard():
+    # Dashboard entfällt – die Timeline ist die neue Startseite.
+    return RedirectResponse(url="/files", status_code=302)
 
 
 @router.get("/search", response_class=HTMLResponse)
@@ -76,9 +41,10 @@ def scan_page(request: Request):
 
 @router.get("/files", response_class=HTMLResponse)
 def files_page(request: Request, db: Session = Depends(get_session)):
-    items, total = repo.list_files(db, limit=100, offset=0)
+    # Zeilen werden per Virtual-Scrolling im Client geladen; hier nur die Gesamtzahl fuer die Ueberschrift.
+    _, total = repo.list_files(db, limit=0, offset=0)
     return templates.TemplateResponse(
-        request, "files.html", {"files": items, "total": total}
+        request, "files.html", {"total": total}
     )
 
 
@@ -92,12 +58,16 @@ def file_detail(request: Request, file_id: str, db: Session = Depends(get_sessio
     sidecar_md = None
     sidecar_json = None
     from app.services import sidecar_service
-    archive_path = Path(f.archive_path)
+    cfg = get_config()
+    archive_path = archive_service.resolve_archive_path(f.archive_path, cfg.paths.archive_root)
     if archive_path.exists():
         sidecar_md = sidecar_service.read_md_sidecar(archive_path)
         sidecar_json = sidecar_service.read_json_sidecar(archive_path)
 
     chunks = repo.get_chunks_for_file(db, file_id)
+
+    from app.services import face_service
+    person_names = face_service.get_person_names_for_file(db, file_id)
 
     return templates.TemplateResponse(
         request,
@@ -107,15 +77,51 @@ def file_detail(request: Request, file_id: str, db: Session = Depends(get_sessio
             "sidecar_md": sidecar_md,
             "sidecar_json": sidecar_json,
             "chunks": chunks,
+            "person_names": person_names,
+        },
+    )
+
+
+@router.get("/files/{file_id}/panel", response_class=HTMLResponse)
+def file_detail_panel(request: Request, file_id: str, db: Session = Depends(get_session)):
+    """Rendert nur den Detail-Inhalt (ohne Basislayout) fuer die AJAX-Sidebar der Dateien-Ansicht."""
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        return HTMLResponse("<p>Datei nicht gefunden</p>", status_code=404)
+
+    sidecar_md = None
+    sidecar_json = None
+    from app.services import sidecar_service
+    cfg = get_config()
+    archive_path = archive_service.resolve_archive_path(f.archive_path, cfg.paths.archive_root)
+    if archive_path.exists():
+        sidecar_md = sidecar_service.read_md_sidecar(archive_path)
+        sidecar_json = sidecar_service.read_json_sidecar(archive_path)
+
+    chunks = repo.get_chunks_for_file(db, file_id)
+
+    from app.services import face_service
+    person_names = face_service.get_person_names_for_file(db, file_id)
+
+    return templates.TemplateResponse(
+        request,
+        "file_detail_panel.html",
+        {
+            "file": f,
+            "sidecar_md": sidecar_md,
+            "sidecar_json": sidecar_json,
+            "chunks": chunks,
+            "person_names": person_names,
         },
     )
 
 
 @router.get("/jobs", response_class=HTMLResponse)
 def jobs_page(request: Request, db: Session = Depends(get_session)):
-    items, total = repo.list_jobs(db, limit=100)
+    # Job-Zeilen werden per Infinite-Scroll im Client nachgeladen; hier nur die Gesamtzahl.
+    _, total = repo.list_jobs(db, limit=0, offset=0)
     return templates.TemplateResponse(
-        request, "jobs.html", {"jobs": items, "total": total}
+        request, "jobs.html", {"total": total}
     )
 
 
@@ -125,10 +131,11 @@ def review_queue(request: Request, db: Session = Depends(get_session)):
     # OCR-Konfidenz aus Sidecar-JSON lesen
     from app.services import sidecar_service
     files_with_conf = []
+    cfg = get_config()
     for f in items:
         conf = None
         try:
-            sj = sidecar_service.read_json_sidecar(Path(f.archive_path))
+            sj = sidecar_service.read_json_sidecar(archive_service.resolve_archive_path(f.archive_path, cfg.paths.archive_root))
             if sj:
                 conf = sj.get("ocr_confidence") or sj.get("avg_confidence")
         except Exception:
@@ -151,7 +158,8 @@ def review_file(request: Request, file_id: str, db: Session = Depends(get_sessio
         return HTMLResponse("<h1>Datei nicht gefunden</h1>", status_code=404)
 
     from app.services import sidecar_service
-    archive_path = Path(f.archive_path)
+    cfg = get_config()
+    archive_path = archive_service.resolve_archive_path(f.archive_path, cfg.paths.archive_root)
     sidecar_json = sidecar_service.read_json_sidecar(archive_path) if archive_path.exists() else None
     sidecar_md = sidecar_service.read_md_sidecar(archive_path) if archive_path.exists() else None
 
@@ -182,10 +190,18 @@ def review_file(request: Request, file_id: str, db: Session = Depends(get_sessio
 def settings_page(request: Request, db: Session = Depends(get_session)):
     from app.config import get_config
     from app.services.ollama_service import get_ollama_service
+    from app.services import clip_service, clap_service
     cfg = get_config()
     ollama = get_ollama_service()
     ollama_available = ollama.is_available()
     ollama_models = ollama.list_models() if ollama_available else []
+    clip_available = clip_service.is_available()
+    clap_available = clap_service.is_available()
+    try:
+        import whisper as _whisper_check  # noqa: F401
+        whisper_python_available = True
+    except ImportError:
+        whisper_python_available = False
     index_meta_str = repo.get_setting(db, "index_meta")
 
     import json
@@ -193,10 +209,12 @@ def settings_page(request: Request, db: Session = Depends(get_session)):
 
     # Gesichts-Cluster laden (nur wenn Feature aktiv)
     face_clusters = []
+    person_groups = []
     if cfg.processing.enable_face_detection:
         try:
-            from app.services.face_service import get_all_clusters
+            from app.services.face_service import get_all_clusters, get_person_groups
             face_clusters = get_all_clusters(db)
+            person_groups = get_person_groups(db)
         except Exception:
             pass
 
@@ -207,7 +225,11 @@ def settings_page(request: Request, db: Session = Depends(get_session)):
             "cfg": cfg,
             "ollama_available": ollama_available,
             "ollama_models": ollama_models,
+            "clip_available": clip_available,
+            "clap_available": clap_available,
+            "whisper_python_available": whisper_python_available,
             "index_meta": index_meta,
             "face_clusters": face_clusters,
+            "person_groups": person_groups,
         },
     )

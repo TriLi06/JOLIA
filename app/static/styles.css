@@ -1,4 +1,423 @@
-/* DocStoreAI – Eigene Styles (Ergänzung zu Pico CSS) */
+/* JOLIA Docs – Eigene Styles (Ergänzung zu Pico CSS) */
+
+/* ============================================================
+   GitHub-Dark Farbpalette (Overrides der Pico-Variablen)
+   ============================================================ */
+[data-theme="dark"] {
+    --pico-background-color: #0d1117;
+    --pico-color: #e6edf3;
+    --pico-h1-color: #f0f6fc;
+    --pico-h2-color: #f0f6fc;
+    --pico-h3-color: #f0f6fc;
+    --pico-h4-color: #e6edf3;
+    --pico-h5-color: #e6edf3;
+    --pico-h6-color: #e6edf3;
+    --pico-muted-color: #7d8590;
+    --pico-muted-border-color: #30363d;
+    --pico-card-background-color: #161b22;
+    --pico-card-border-color: #30363d;
+    --pico-card-sectioning-background-color: #161b22;
+    --pico-table-border-color: #30363d;
+    --pico-table-row-stripped-background-color: #12171f;
+    --pico-secondary-background: #21262d;
+    /* Links blau, primäre Buttons neutral (GitHub-Stil), Grün nur für Aktionen */
+    --pico-primary: #2f81f7;
+    --pico-primary-hover: #58a6ff;
+    --pico-primary-focus: rgba(47, 129, 247, 0.3);
+    --pico-primary-background: #21262d;
+    --pico-primary-hover-background: #30363d;
+    --pico-primary-border: #30363d;
+    --pico-primary-hover-border: #8b949e;
+    --pico-primary-inverse: #e6edf3;
+    --pico-secondary: #8b949e;
+    --pico-secondary-hover: #b1bac4;
+    --pico-form-element-background-color: #0d1117;
+    --pico-form-element-border-color: #30363d;
+    --pico-form-element-active-background-color: #0d1117;
+    --pico-form-element-active-border-color: #2f81f7;
+    --pico-form-element-focus-color: rgba(47, 129, 247, 0.3);
+    --pico-del-color: #f85149;
+    --pico-ins-color: #2ea043;
+    --pico-border-radius: 6px;
+    /* Aliase für die (in Pico v2 entfernten) alten Variablennamen,
+       damit bestehende Custom-Komponenten im Dark-Mode korrekt eingefärbt werden. */
+    --color: var(--pico-color);
+    --background-color: var(--pico-background-color);
+    --card-background-color: var(--pico-card-background-color);
+    --card-border-color: var(--pico-card-border-color);
+    --table-border-color: var(--pico-muted-border-color);
+    --muted-color: var(--pico-muted-color);
+    --muted-border-color: var(--pico-muted-border-color);
+    --primary: var(--pico-primary);
+    --primary-inverse: #ffffff;
+    --secondary: var(--pico-secondary);
+    --secondary-background: var(--pico-secondary-background);
+    --del-color: var(--pico-del-color);
+    --ins-color: var(--pico-ins-color);
+    --border-radius: var(--pico-border-radius);
+}
+
+body {
+    background: var(--pico-background-color);
+}
+
+/* Inline-SVG-Icons (Feather-Stil, strichbasiert) */
+.icon {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex: none;
+    vertical-align: middle;
+}
+
+/* ============================================================
+   Top-Bar Navigation
+   ============================================================ */
+.app-nav {
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    position: sticky;
+    top: 0;
+    z-index: 500;
+}
+.app-nav-inner {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 1.25rem;
+    flex-wrap: wrap;
+}
+.app-nav .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--pico-color);
+    text-decoration: none;
+    margin-right: 0.5rem;
+}
+.app-nav .brand .icon {
+    width: 20px;
+    height: 20px;
+    color: #2f81f7;
+}
+.nav-primary {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    margin: 0;
+}
+.nav-primary a,
+.nav-secondary a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: 6px;
+    color: #c9d1d9;
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: background 0.12s, color 0.12s;
+}
+.nav-primary a:hover,
+.nav-secondary a:hover {
+    background: #21262d;
+    color: #ffffff;
+}
+.nav-primary a.is-active {
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: inset 0 -2px 0 0 #f78166;
+    border-radius: 6px 6px 0 0;
+}
+.nav-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.nav-scan {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.4rem 0.85rem;
+    border-radius: 6px;
+    background: #238636;
+    color: #ffffff !important;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    border: 1px solid rgba(240, 246, 252, 0.1);
+    transition: background 0.12s;
+}
+.nav-scan:hover {
+    background: #2ea043;
+}
+.nav-secondary {
+    display: flex;
+    align-items: center;
+    gap: 0.1rem;
+    margin: 0;
+    padding-left: 0.75rem;
+    border-left: 1px solid #30363d;
+}
+.nav-secondary a {
+    padding: 0.4rem;
+    color: #8b949e;
+}
+.nav-secondary a.is-active {
+    background: #21262d;
+    color: #ffffff;
+}
+
+/* Globaler Hinweisbalken (z. B. Modell-Mismatch) */
+.app-banner {
+    display: block;
+    background: #341a00;
+    color: #e3b341;
+    border-bottom: 1px solid #5a3a00;
+    padding: 0.5rem 1.25rem;
+    text-align: center;
+    font-size: 0.85rem;
+    text-decoration: none;
+}
+.app-banner:hover {
+    background: #3d2200;
+    color: #f2cc60;
+}
+
+/* ============================================================
+   Dateien-Seite: Voll­breiten-Layout + Kontext-Sidebar
+   ============================================================ */
+.files-fullbleed {
+    width: 100vw;
+    position: relative;
+    left: 50%;
+    margin-left: -50vw;
+    padding: 0 1.5rem;
+    box-sizing: border-box;
+}
+.files-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+.files-header h1 {
+    margin: 0;
+    font-size: 1.4rem;
+}
+.files-header .files-total {
+    color: var(--pico-muted-color);
+    font-size: 0.85rem;
+    font-weight: 400;
+}
+.files-header .files-header-spacer {
+    flex: 1 1 auto;
+}
+.context-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    width: auto;
+    margin: 0;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.85rem;
+}
+.view-switch {
+    display: inline-flex;
+    gap: 0.25rem;
+}
+.view-switch button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    width: auto;
+    margin: 0;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.85rem;
+}
+
+.files-layout {
+    display: flex;
+    gap: 1.25rem;
+    align-items: flex-start;
+}
+.files-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.context-sidebar {
+    flex: 0 0 250px;
+    width: 250px;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    position: sticky;
+    top: 64px;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+}
+.files-layout.context-collapsed .context-sidebar {
+    display: none;
+}
+.context-sidebar h2 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--pico-muted-color);
+    margin: 0 0 0.85rem;
+}
+.filter-field {
+    margin-bottom: 0.9rem;
+}
+.filter-field > label {
+    display: block;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--pico-muted-color);
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+}
+.filter-field input,
+.filter-field select {
+    margin-bottom: 0;
+    font-size: 0.85rem;
+}
+.context-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+.context-actions button {
+    width: auto;
+    margin: 0;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.8rem;
+}
+
+/* ============================================================
+   Jira-artige Tag-Mehrfachauswahl (Badges in einer Zeile)
+   ============================================================ */
+.tag-select {
+    position: relative;
+}
+.tag-select-control {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem;
+    min-height: 38px;
+    padding: 0.3rem 0.4rem;
+    background: var(--pico-form-element-background-color);
+    border: 1px solid var(--pico-form-element-border-color);
+    border-radius: 6px;
+    cursor: text;
+}
+.tag-select-control.focused {
+    border-color: #2f81f7;
+    box-shadow: 0 0 0 3px rgba(47, 129, 247, 0.3);
+}
+.tag-token {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.1rem 0.1rem 0.1rem 0.5rem;
+    background: rgba(31, 111, 235, 0.2);
+    color: #79c0ff;
+    border: 1px solid rgba(31, 111, 235, 0.35);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.tag-token button {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 0 0.35rem;
+    margin: 0;
+    font-size: 0.9rem;
+    line-height: 1;
+    width: auto;
+    border-radius: 999px;
+}
+.tag-token button:hover {
+    background: rgba(31, 111, 235, 0.4);
+    color: #fff;
+}
+.tag-select-input {
+    flex: 1 1 60px;
+    min-width: 60px;
+    border: none;
+    background: transparent;
+    outline: none;
+    color: var(--pico-color);
+    font-size: 0.85rem;
+    padding: 0.2rem;
+    margin: 0;
+    box-shadow: none;
+}
+.tag-select-dropdown {
+    position: absolute;
+    z-index: 60;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.tag-select-option {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+.tag-select-option:hover,
+.tag-select-option.active {
+    background: #21262d;
+}
+.tag-select-option .count {
+    color: var(--pico-muted-color);
+    font-size: 0.75rem;
+}
+.tag-select-empty {
+    padding: 0.5rem 0.6rem;
+    color: var(--pico-muted-color);
+    font-size: 0.8rem;
+}
+
+@media (max-width: 900px) {
+    .files-layout {
+        flex-direction: column;
+    }
+    .context-sidebar {
+        position: static;
+        width: 100%;
+        flex-basis: auto;
+        max-height: none;
+    }
+    .nav-primary a span,
+    .nav-scan span {
+        display: none;
+    }
+}
 
 /* Navigation */
 nav .brand {
@@ -19,18 +438,311 @@ nav .brand {
 /* Status-Badges */
 .status-badge {
     display: inline-block;
-    padding: 0.15rem 0.5rem;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+.status-processed    { background: rgba(46,160,67,0.15);  color: #3fb950; border-color: rgba(46,160,67,0.4); }
+.status-processing   { background: rgba(47,129,247,0.15); color: #58a6ff; border-color: rgba(47,129,247,0.4); }
+.status-queued       { background: rgba(139,148,158,0.15); color: #8b949e; border-color: rgba(139,148,158,0.4); }
+.status-imported     { background: rgba(47,129,247,0.1);  color: #79c0ff; border-color: rgba(47,129,247,0.3); }
+.status-failed       { background: rgba(248,81,73,0.15);  color: #f85149; border-color: rgba(248,81,73,0.4); }
+.status-needs_review { background: rgba(210,153,34,0.15); color: #e3b341; border-color: rgba(210,153,34,0.4); }
+.status-skipped_duplicate { background: rgba(139,148,158,0.12); color: #8b949e; border-color: rgba(139,148,158,0.3); }
+.status-deleted      { background: rgba(139,148,158,0.12); color: #8b949e; border-color: rgba(139,148,158,0.3); text-decoration: line-through; }
+.status-potential_duplicate { background: rgba(210,153,34,0.15); color: #d29922; border-color: rgba(210,153,34,0.4); }
+
+/* Filter-Panel (Dateien-Liste) */
+.filter-panel {
+    background: var(--card-background-color, #fff);
+    border: 1px solid var(--card-border-color, #e2e2e2);
+    border-radius: var(--border-radius);
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+}
+.filter-panel-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem 1rem;
+}
+.filter-panel-grid label {
+    margin-bottom: 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.filter-panel-grid input,
+.filter-panel-grid select {
+    margin-top: 0.25rem;
+}
+.filter-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+}
+.filter-panel-spacer {
+    flex: 1 1 auto;
+}
+#search-btn {
+    width: auto;
+    padding-inline: 1.25rem;
+}
+
+/* Tag-Badges (Datei-Detail, Dateien-Liste) */
+.tag-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.55rem;
     border-radius: 999px;
     font-size: 0.75rem;
     font-weight: 600;
+    background: rgba(31, 111, 235, 0.2);
+    color: #79c0ff;
+    border: 1px solid rgba(31, 111, 235, 0.35);
 }
-.status-processed    { background: #d1fae5; color: #065f46; }
-.status-processing   { background: #dbeafe; color: #1e40af; }
-.status-queued       { background: #e0e7ff; color: #3730a3; }
-.status-imported     { background: #f0f9ff; color: #0369a1; }
-.status-failed       { background: #fee2e2; color: #991b1b; }
-.status-needs_review { background: #fef3c7; color: #92400e; }
-.status-skipped_duplicate { background: #f3f4f6; color: #6b7280; }
+.tag-badge button {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 0;
+    margin: 0;
+}
+
+/* Personen-Badges (erkannte Gesichter im Datei-Detail) */
+.person-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-decoration: none;
+    background: rgba(63, 185, 80, 0.18);
+    color: #7ee787;
+    border: 1px solid rgba(63, 185, 80, 0.35);
+}
+.person-badge:hover {
+    background: rgba(63, 185, 80, 0.3);
+}
+
+
+/* Sidebar-Detailansicht (Dateien-Liste, Suche & Timeline) */
+.file-sidebar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 500px;
+    max-width: 92vw;
+    height: 100%;
+    overflow-y: auto;
+    background: var(--card-background-color, #fff);
+    box-shadow: -4px 0 16px rgba(0,0,0,0.15);
+    padding: 1rem;
+    z-index: 1000;
+    transform: translateX(105%);
+    transition: transform 0.25s ease;
+}
+.file-sidebar.open { transform: translateX(0); }
+.file-sidebar-resize-handle {
+    position: absolute;
+    top: 0;
+    left: -4px;
+    width: 8px;
+    height: 100%;
+    cursor: ew-resize;
+    z-index: 1001;
+}
+.file-sidebar-resize-handle:hover,
+.file-sidebar-resize-handle:active {
+    background: rgba(0,0,0,0.1);
+}
+.file-sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.25);
+    z-index: 999;
+}
+
+/* Chunks-Bereich in der Detailansicht: Titel nur einmal, klappbar */
+.chunks-details {
+    margin: .75rem 0;
+}
+.chunks-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: .5rem .75rem;
+    border: 1px solid var(--pico-muted-border-color, #30363d);
+    border-radius: 6px;
+    list-style: none;
+}
+.chunks-details summary::-webkit-details-marker {
+    display: none;
+}
+.chunks-details[open] summary {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+.chunks-list {
+    padding: .75rem;
+    border: 1px solid var(--pico-muted-border-color, #30363d);
+    border-top: none;
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
+
+/* Buttons im Detailbereich sollen immer einzeilig bleiben statt umzubrechen */
+.file-sidebar button,
+.file-sidebar [role="button"],
+.file-detail-content button,
+.file-detail-content [role="button"] {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+
+/* Duplikat-/Serien-Filmstreifen */
+.duplicate-filmstrip {
+    display: flex;
+    gap: .5rem;
+    overflow-x: auto;
+    padding: .5rem 0;
+}
+.duplicate-thumb {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    flex: none;
+    cursor: pointer;
+    border: 2px solid transparent;
+    border-radius: 4px;
+    overflow: hidden;
+}
+.duplicate-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.duplicate-thumb.is-best { border-color: gold; }
+.duplicate-thumb.is-current { outline: 2px solid var(--primary); }
+.duplicate-thumb .best-badge {
+    position: absolute; top: 0; left: 0;
+    background: gold; color: #000; font-size: 0.6rem;
+    padding: 0 3px;
+}
+.duplicate-thumb .status-badge {
+    position: absolute; bottom: 0; right: 0;
+    font-size: 0.55rem; padding: 0 3px;
+}
+
+/* Timeline-Ansicht (Tageszeilen mit Thumbnail-Kacheln, Google-Fotos-Stil) */
+#timeline-view {
+    /* Füllt die Hauptspalte des Dateien-Layouts (Vollbreite via .files-fullbleed) */
+    width: auto;
+    position: static;
+    padding: 0;
+    box-sizing: border-box;
+    overflow-x: hidden;
+}
+.timeline-day-row { margin-bottom: 1.5rem; }
+.timeline-day-header { margin: 0 0 .5rem 1.25rem; }
+.timeline-day-placeholder { margin: .5rem 0 0 1.25rem; color: var(--muted-color, #888); }
+.thumb-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 4px;
+}
+.timeline-day-grid { min-height: 128px; }
+
+/* Virtual-Scrolling der Dateien-Liste (nur sichtbare Zeilen im DOM) */
+.virtual-scroll {
+    overflow: auto;
+    max-height: calc(100vh - 320px);
+    min-height: 300px;
+}
+#files-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--card-background-color, var(--background-color, #fff));
+}
+#files-table tbody tr:not(.vs-spacer) { height: 48px; }
+#files-table tbody td {
+    height: 48px;
+    padding-top: 0;
+    padding-bottom: 0;
+    vertical-align: middle;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 260px;
+}
+#files-table tbody tr.vs-spacer td {
+    padding: 0;
+    border: 0;
+    max-width: none;
+    overflow: visible;
+}
+.thumb-tile {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    cursor: pointer;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--secondary-background, #eee);
+}
+.thumb-tile img { width: 100%; height: 100%; object-fit: cover; }
+.thumb-tile.thumb-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: .25rem;
+    border: 1px solid var(--muted-border-color, #ddd);
+}
+.thumb-tile-icon {
+    font-size: 2rem;
+}
+.thumb-tile-caption {
+    font-size: 0.65rem;
+    line-height: 1.1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    word-break: break-word;
+    margin-top: .25rem;
+}
+.thumb-tooltip {
+    position: absolute;
+    max-width: 300px;
+    background: #111;
+    color: #fff;
+    font-size: 0.75rem;
+    line-height: 1.35;
+    padding: .5rem .7rem;
+    border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+    z-index: 2000;
+    pointer-events: none;
+}
+.thumb-tooltip strong { word-break: break-word; }
+.thumb-tooltip-meta { color: #bbb; }
+.thumb-tooltip-tags { color: #8ecaff; }
+.thumb-tooltip-summary {
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: #ddd;
+}
 
 /* Score-Badge in Suche */
 .score {
@@ -108,8 +820,8 @@ nav .brand {
     padding: 1rem;
 }
 
-.success { color: #065f46; }
-.error { color: #991b1b; }
+.success { color: #3fb950; }
+.error { color: #f85149; }
 
 /* Badge */
 .badge {

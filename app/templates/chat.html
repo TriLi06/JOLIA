@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Chat – DocStoreAI{% endblock %}
+{% block title %}Chat – JOLIA Docs{% endblock %}
 
 {% block content %}
 <h1>💬 Archiv-Chat</h1>
@@ -59,7 +59,8 @@ async function sendMessage(event) {
             ? '<div class="sources"><strong>Quellen:</strong> ' +
               data.sources.map(s => {
                   const href = s.file_id ? `/files/${s.file_id}` : '/files';
-                  return `<a href="${href}" title="${escapeHtml(s.source_path)}">${escapeHtml(s.file_name)}</a>`;
+                  const onclick = s.file_id ? ` onclick="return openDetail(event, '${s.file_id}')"` : '';
+                  return `<a href="${href}" title="${escapeHtml(s.source_path)}"${onclick}>${escapeHtml(s.file_name)}</a>`;
               }).join(', ') +
               '</div>'
             : '';

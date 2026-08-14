@@ -1,88 +1,554 @@
 {% extends "base.html" %}
-{% block title %}Dateien – DocStoreAI{% endblock %}
+{% block title %}Dateien – JOLIA Docs{% endblock %}
 
 {% block content %}
-<h1>📁 Archivierte Dateien <small>({{ total }})</small></h1>
+<div class="files-fullbleed">
+    <div class="files-header">
+        <button class="context-toggle outline secondary" onclick="toggleContext()" title="Filter ein-/ausblenden">☰ Filter</button>
+        <h1>Timeline <span class="files-total" id="files-total">({{ total }})</span></h1>
+        <span class="files-header-spacer"></span>
+        <div class="view-switch">
+            <button class="outline secondary" id="view-list-btn" onclick="switchView('list')">Liste</button>
+            <button class="outline" id="view-timeline-btn" onclick="switchView('timeline')">Timeline</button>
+        </div>
+    </div>
 
-<div class="grid" style="margin-bottom:1rem">
-    <input type="search" id="filter-input" placeholder="Dateiname filtern…" oninput="filterFiles()">
-    <select id="filter-status" onchange="filterFiles()">
-        <option value="">Alle Status</option>
-        <option value="processed">Verarbeitet</option>
-        <option value="needs_review">Review nötig</option>
-        <option value="failed">Fehlerhaft</option>
-        <option value="processing">In Bearbeitung</option>
-    </select>
-    <select id="filter-type" onchange="filterFiles()">
-        <option value="">Alle Typen</option>
-        <option value="documents">Dokumente</option>
-        <option value="images">Bilder</option>
-        <option value="audio">Audio</option>
-        <option value="video">Video</option>
-    </select>
+    <div class="files-layout" id="files-layout">
+        <aside class="context-sidebar" id="context-sidebar">
+            <h2>Filter</h2>
+            <div class="filter-field">
+                <label for="filter-q">Volltext</label>
+                <input type="search" id="filter-q" placeholder="Name, OCR, Chunks…" oninput="debouncedReload()" onkeydown="if(event.key==='Enter'){event.preventDefault();reloadFiles();}">
+            </div>
+            <div class="filter-field">
+                <label for="filter-status">Status</label>
+                <select id="filter-status" onchange="reloadFiles()">
+                    <option value="">Alle (außer gelöscht)</option>
+                    <option value="processed">Verarbeitet</option>
+                    <option value="needs_review">Review nötig</option>
+                    <option value="failed">Fehlerhaft</option>
+                    <option value="processing">In Bearbeitung</option>
+                    <option value="potential_duplicate">Mögliches Duplikat</option>
+                    <option value="deleted">Gelöscht</option>
+                </select>
+            </div>
+            <div class="filter-field">
+                <label for="filter-type">Typ</label>
+                <select id="filter-type" onchange="reloadFiles()">
+                    <option value="">Alle Typen</option>
+                    <option value="documents">Dokumente</option>
+                    <option value="images">Bilder</option>
+                    <option value="audio">Audio</option>
+                    <option value="video">Video</option>
+                </select>
+            </div>
+            <div class="filter-field">
+                <label>Tags</label>
+                <div id="tag-select" class="tag-select"></div>
+            </div>
+            <div class="filter-field">
+                <label for="filter-date-from">Von</label>
+                <input type="date" id="filter-date-from" onchange="reloadFiles()">
+            </div>
+            <div class="filter-field">
+                <label for="filter-date-to">Bis</label>
+                <input type="date" id="filter-date-to" onchange="reloadFiles()">
+            </div>
+            <div class="context-actions">
+                <button class="outline secondary" id="reset-filters-btn" onclick="resetFilters()">✕ Zurücksetzen</button>
+            </div>
+        </aside>
+
+        <div class="files-main">
+            <div id="list-view" style="display:none">
+                <div id="files-scroll" class="virtual-scroll">
+                    <table id="files-table">
+                        <thead>
+                            <tr>
+                                <th>Dateiname</th>
+                                <th>Typ</th>
+                                <th>Tags</th>
+                                <th>Größe</th>
+                                <th>Status</th>
+                                <th>Importiert</th>
+                                <th>Aktionen</th>
+                            </tr>
+                        </thead>
+                        <tbody id="files-table-body"></tbody>
+                    </table>
+                </div>
+                <p id="files-empty" style="display:none">Noch keine Dateien im Archiv. <a href="/scan">Dokumente scannen →</a></p>
+            </div>
+
+            <div id="timeline-view">
+                <div id="timeline-container"></div>
+            </div>
+        </div>
+    </div>
 </div>
-
-<table id="files-table">
-    <thead>
-        <tr>
-            <th>Dateiname</th>
-            <th>Typ</th>
-            <th>Größe</th>
-            <th>Status</th>
-            <th>Importiert</th>
-            <th>Aktionen</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for f in files %}
-        <tr data-status="{{ f.status }}" data-type="{{ f.content_type or '' }}" data-name="{{ f.original_filename | lower }}">
-            <td><a href="/files/{{ f.id }}">{{ f.original_filename }}</a></td>
-            <td><small>{{ f.content_type or '–' }}</small></td>
-            <td><small>{{ "%.1f" | format((f.file_size or 0) / 1024) }} KB</small></td>
-            <td><span class="status-badge status-{{ f.status }}">{{ f.status }}</span></td>
-            <td><small>{{ f.imported_at[:10] if f.imported_at else '–' }}</small></td>
-            <td>
-                <a href="/files/{{ f.id }}" role="button" class="outline small">Details</a>
-                <button onclick="reprocessFile('{{ f.id }}')" class="outline secondary small">↻</button>
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-
-{% if not files %}
-<p>Noch keine Dateien im Archiv. <a href="/dashboard">Inbox importieren →</a></p>
-{% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script>
-function filterFiles() {
-    const nameFilter = document.getElementById('filter-input').value.toLowerCase();
-    const statusFilter = document.getElementById('filter-status').value;
-    const typeFilter = document.getElementById('filter-type').value;
+let currentView = 'timeline';
+let reloadTimer = null;
 
-    document.querySelectorAll('#files-table tbody tr').forEach(row => {
-        const name = row.dataset.name || '';
-        const status = row.dataset.status || '';
-        const type = row.dataset.type || '';
-        const visible =
-            (!nameFilter || name.includes(nameFilter)) &&
-            (!statusFilter || status === statusFilter) &&
-            (!typeFilter || type === typeFilter);
-        row.style.display = visible ? '' : 'none';
+function debouncedReload() {
+    clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(reloadFiles, 350);
+}
+
+function resetFilters() {
+    document.getElementById('filter-q').value = '';
+    document.getElementById('filter-status').value = '';
+    document.getElementById('filter-type').value = '';
+    document.getElementById('filter-date-from').value = '';
+    document.getElementById('filter-date-to').value = '';
+    TagSelect.setSelected([]);
+    reloadFiles();
+}
+
+function buildFilterParams() {
+    const params = new URLSearchParams();
+    const q = document.getElementById('filter-q').value.trim();
+    const status = document.getElementById('filter-status').value;
+    const type = document.getElementById('filter-type').value;
+    const tags = TagSelect.getSelected();
+    const dateFrom = document.getElementById('filter-date-from').value;
+    const dateTo = document.getElementById('filter-date-to').value;
+    if (q) params.set('q', q);
+    if (status) params.set('status', status);
+    if (type) params.set('content_type', type);
+    tags.forEach(t => params.append('tags', t));
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    return params;
+}
+
+/* Jira-artige Tag-Mehrfachauswahl: gewählte Tags als Badges in einer Zeile,
+   Dropdown-Suche zum Hinzufügen, ✕ zum Entfernen. */
+const TagSelect = (function () {
+    let root, control, inputEl, dropdown = null;
+    let all = [];        // [{name, count}]
+    let selected = [];   // [name]
+    let activeIdx = -1;
+    let onChange = function () {};
+
+    function init(el, opts) {
+        root = el;
+        onChange = (opts && opts.onChange) || onChange;
+        root.innerHTML = '<div class="tag-select-control"><input class="tag-select-input" placeholder="Tags…" autocomplete="off"></div>';
+        control = root.querySelector('.tag-select-control');
+        inputEl = root.querySelector('.tag-select-input');
+        control.addEventListener('click', () => inputEl.focus());
+        inputEl.addEventListener('focus', () => { control.classList.add('focused'); openDropdown(); });
+        inputEl.addEventListener('input', () => { activeIdx = -1; openDropdown(); });
+        inputEl.addEventListener('keydown', onKeydown);
+        document.addEventListener('click', (e) => { if (!root.contains(e.target)) closeDropdown(); });
+    }
+    function setOptions(items) { all = items || []; }
+    function setSelected(names) { selected = (names || []).filter(Boolean); render(); }
+    function getSelected() { return selected.slice(); }
+    function add(name) {
+        if (name && !selected.includes(name)) { selected.push(name); render(); onChange(); }
+        inputEl.value = '';
+    }
+    function remove(name) { selected = selected.filter(n => n !== name); render(); onChange(); }
+    function render() {
+        control.querySelectorAll('.tag-token').forEach(t => t.remove());
+        selected.forEach(name => {
+            const token = document.createElement('span');
+            token.className = 'tag-token';
+            token.innerHTML = escapeHtml(name) + '<button type="button" tabindex="-1" aria-label="Entfernen">✕</button>';
+            token.querySelector('button').addEventListener('click', (e) => { e.stopPropagation(); remove(name); });
+            control.insertBefore(token, inputEl);
+        });
+    }
+    function filteredOptions() {
+        const query = inputEl.value.trim().toLowerCase();
+        return all.filter(o => !selected.includes(o.name) && o.name.toLowerCase().includes(query));
+    }
+    function openDropdown() {
+        const opts = filteredOptions();
+        if (dropdown) dropdown.remove();
+        dropdown = document.createElement('div');
+        dropdown.className = 'tag-select-dropdown';
+        if (!opts.length) {
+            dropdown.innerHTML = '<div class="tag-select-empty">Keine passenden Tags</div>';
+        } else {
+            dropdown.innerHTML = opts.map((o, i) =>
+                `<div class="tag-select-option${i === activeIdx ? ' active' : ''}" data-name="${escapeHtml(o.name)}"><span>${escapeHtml(o.name)}</span><span class="count">${o.count}</span></div>`
+            ).join('');
+            dropdown.querySelectorAll('.tag-select-option').forEach(el => {
+                el.addEventListener('mousedown', (e) => { e.preventDefault(); add(el.dataset.name); openDropdown(); });
+            });
+        }
+        root.appendChild(dropdown);
+    }
+    function closeDropdown() {
+        control.classList.remove('focused');
+        if (dropdown) { dropdown.remove(); dropdown = null; }
+        activeIdx = -1;
+    }
+    function onKeydown(e) {
+        const opts = filteredOptions();
+        if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(opts.length - 1, activeIdx + 1); openDropdown(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(0, activeIdx - 1); openDropdown(); }
+        else if (e.key === 'Enter') { e.preventDefault(); if (activeIdx >= 0 && opts[activeIdx]) { add(opts[activeIdx].name); openDropdown(); } }
+        else if (e.key === 'Backspace' && !inputEl.value && selected.length) { remove(selected[selected.length - 1]); }
+        else if (e.key === 'Escape') { closeDropdown(); inputEl.blur(); }
+    }
+    return { init, setOptions, setSelected, getSelected };
+})();
+
+async function loadTagFilterOptions() {
+    try {
+        const r = await fetch('/api/tags');
+        const data = await r.json();
+        TagSelect.setOptions((data.items || []).map(t => ({ name: t.name, count: t.count })));
+        const preselected = new URLSearchParams(window.location.search).getAll('tags');
+        if (preselected.length) TagSelect.setSelected(preselected);
+    } catch (e) {
+        console.warn('Tags konnten nicht geladen werden', e);
+    }
+}
+
+function toggleContext() {
+    const layout = document.getElementById('files-layout');
+    layout.classList.toggle('context-collapsed');
+    localStorage.setItem('filesContextCollapsed', layout.classList.contains('context-collapsed') ? '1' : '0');
+    if (currentView === 'timeline') reloadTimelineView();
+}
+
+async function initFilesPage() {
+    if (localStorage.getItem('filesContextCollapsed') === '1') {
+        document.getElementById('files-layout').classList.add('context-collapsed');
+    }
+    TagSelect.init(document.getElementById('tag-select'), { onChange: reloadFiles });
+    document.getElementById('files-scroll').addEventListener('scroll', onListScroll, { passive: true });
+    window.addEventListener('resize', () => { if (currentView === 'list') renderVirtualRows(); });
+    await loadTagFilterOptions();
+    reloadFiles();
+}
+initFilesPage();
+
+function switchView(view) {
+    currentView = view;
+    document.getElementById('list-view').style.display = view === 'list' ? '' : 'none';
+    document.getElementById('timeline-view').style.display = view === 'timeline' ? '' : 'none';
+    document.getElementById('view-list-btn').classList.toggle('secondary', view !== 'list');
+    document.getElementById('view-timeline-btn').classList.toggle('secondary', view !== 'timeline');
+    reloadFiles();
+}
+
+async function reloadFiles() {
+    if (currentView === 'list') {
+        await reloadListView();
+    } else {
+        await reloadTimelineView();
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Virtual-Scrolling der Listenansicht                                 */
+/* Es werden nur die aktuell sichtbaren Zeilen im DOM gehalten; Daten  */
+/* werden seitenweise vom Backend nachgeladen und weit entfernte       */
+/* Seiten wieder aus dem Speicher entfernt. So bleibt die Ansicht auch */
+/* bei > 100.000 Dateien flüssig und belastet das Backend kaum.        */
+/* ------------------------------------------------------------------ */
+const VS_PAGE_SIZE = 100;      // Datensätze pro Backend-Anfrage
+const VS_BUFFER_ROWS = 12;     // zusätzlich gerenderte Zeilen ober-/unterhalb des Viewports
+const VS_PAGE_KEEP = 3;        // Seiten ober-/unterhalb des sichtbaren Bereichs im Cache behalten
+let VS_ROW_HEIGHT = 48;        // wird nach dem ersten Rendern kalibriert
+
+const vs = {
+    total: 0,
+    filterQuery: '',
+    cache: new Map(),        // globaler Index -> Datei-Objekt
+    pagesLoaded: new Set(),
+    pagesLoading: new Set(),
+    calibrated: false,
+    scrollScheduled: false,
+};
+
+function resetVirtualList() {
+    vs.cache.clear();
+    vs.pagesLoaded.clear();
+    vs.pagesLoading.clear();
+    vs.total = 0;
+    vs.calibrated = false;
+}
+
+async function reloadListView() {
+    resetVirtualList();
+    vs.filterQuery = buildFilterParams().toString();
+    const scroller = document.getElementById('files-scroll');
+    scroller.scrollTop = 0;
+    await loadVirtualPage(0);
+    document.getElementById('files-total').textContent = `(${vs.total})`;
+    document.getElementById('files-empty').style.display = vs.total ? 'none' : 'block';
+    renderVirtualRows();
+}
+
+async function loadVirtualPage(page) {
+    if (vs.pagesLoaded.has(page) || vs.pagesLoading.has(page)) return;
+    vs.pagesLoading.add(page);
+    const params = new URLSearchParams(vs.filterQuery);
+    params.set('limit', VS_PAGE_SIZE);
+    params.set('offset', page * VS_PAGE_SIZE);
+    try {
+        const r = await fetch(`/api/files?${params}`);
+        const data = await r.json();
+        vs.total = data.total;
+        data.items.forEach((item, i) => vs.cache.set(page * VS_PAGE_SIZE + i, item));
+        vs.pagesLoaded.add(page);
+    } catch (e) {
+        console.warn('Seite konnte nicht geladen werden', e);
+    } finally {
+        vs.pagesLoading.delete(page);
+        if (currentView === 'list' && vs.calibrated) renderVirtualRows();
+    }
+}
+
+function ensurePagesForRange(start, end) {
+    const firstPage = Math.floor(start / VS_PAGE_SIZE);
+    const lastPage = Math.floor(Math.max(start, end - 1) / VS_PAGE_SIZE);
+    for (let p = firstPage; p <= lastPage; p++) loadVirtualPage(p);
+    // Weit entfernte Seiten aus dem Cache entfernen (Speicher freigeben)
+    const keepFrom = firstPage - VS_PAGE_KEEP;
+    const keepTo = lastPage + VS_PAGE_KEEP;
+    for (const p of Array.from(vs.pagesLoaded)) {
+        if (p < keepFrom || p > keepTo) {
+            for (let i = 0; i < VS_PAGE_SIZE; i++) vs.cache.delete(p * VS_PAGE_SIZE + i);
+            vs.pagesLoaded.delete(p);
+        }
+    }
+}
+
+function renderVirtualRows() {
+    const scroller = document.getElementById('files-scroll');
+    const tbody = document.getElementById('files-table-body');
+    const scrollTop = scroller.scrollTop;
+    const viewportH = scroller.clientHeight || 600;
+
+    let start = Math.floor(scrollTop / VS_ROW_HEIGHT) - VS_BUFFER_ROWS;
+    let end = Math.ceil((scrollTop + viewportH) / VS_ROW_HEIGHT) + VS_BUFFER_ROWS;
+    start = Math.max(0, start);
+    end = Math.min(vs.total, Math.max(start, end));
+
+    ensurePagesForRange(start, end);
+
+    const topH = start * VS_ROW_HEIGHT;
+    const bottomH = Math.max(0, vs.total - end) * VS_ROW_HEIGHT;
+
+    let html = `<tr class="vs-spacer"><td colspan="7" style="height:${topH}px;padding:0;border:0"></td></tr>`;
+    for (let i = start; i < end; i++) {
+        const item = vs.cache.get(i);
+        html += item ? rowHtml(item) : placeholderRow();
+    }
+    html += `<tr class="vs-spacer"><td colspan="7" style="height:${bottomH}px;padding:0;border:0"></td></tr>`;
+    tbody.innerHTML = html;
+
+    if (!vs.calibrated) calibrateRowHeight();
+}
+
+function placeholderRow() {
+    return '<tr class="vs-placeholder"><td colspan="7"><small>Lädt…</small></td></tr>';
+}
+
+// Tatsächliche Zeilenhöhe einmalig messen, falls sie von der Annahme abweicht.
+function calibrateRowHeight() {
+    const row = document.querySelector('#files-table-body tr:not(.vs-spacer):not(.vs-placeholder)');
+    vs.calibrated = true;
+    if (row) {
+        const h = row.getBoundingClientRect().height;
+        if (h && Math.abs(h - VS_ROW_HEIGHT) > 1) {
+            VS_ROW_HEIGHT = h;
+            renderVirtualRows();
+        }
+    }
+}
+
+function onListScroll() {
+    if (vs.scrollScheduled) return;
+    vs.scrollScheduled = true;
+    requestAnimationFrame(() => {
+        vs.scrollScheduled = false;
+        if (currentView === 'list') renderVirtualRows();
     });
 }
 
-async function reprocessFile(fileId) {
-    if (!confirm('Datei erneut verarbeiten?')) return;
+function rowHtml(f) {
+    const sizeKb = ((f.file_size || 0) / 1024).toFixed(1);
+    const importedDate = f.imported_at ? f.imported_at.slice(0, 10) : '–';
+    const tagsHtml = (f.tags || []).map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join(' ');
+    return `
+    <tr data-id="${f.id}">
+        <td><a href="/files/${f.id}" onclick="return openDetail(event, '${f.id}')" title="${escapeHtml(f.original_filename)}">${escapeHtml(f.original_filename)}</a></td>
+        <td><small>${f.content_type || '–'}</small></td>
+        <td>${tagsHtml}</td>
+        <td><small>${sizeKb} KB</small></td>
+        <td><span class="status-badge status-${f.status}">${f.status}</span></td>
+        <td><small>${importedDate}</small></td>
+        <td>
+            <a href="/files/${f.id}" role="button" class="outline small" onclick="return openDetail(event, '${f.id}')">Details</a>
+            <button onclick="reprocessFile('${f.id}')" class="outline secondary small">↻</button>
+            <button onclick="deleteFileRow('${f.id}')" class="outline contrast small">🗑</button>
+        </td>
+    </tr>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Timeline: alle Tage werden günstig als Kopfzeilen gerendert, die    */
+/* Vorschaubilder eines Tages werden erst beim Heranscrollen geladen   */
+/* und beim Wegscrollen wieder entladen.                               */
+/* ------------------------------------------------------------------ */
+let timelineObserver = null;
+
+async function reloadTimelineView() {
+    const params = buildFilterParams();
+    const container = document.getElementById('timeline-container');
+    let data;
     try {
-        const r = await fetch(`/api/files/${fileId}/reprocess`, { method: 'POST' });
+        const r = await fetch(`/api/files/timeline/days?${params}`);
+        data = await r.json();
+    } catch (e) {
+        container.innerHTML = '<p>Timeline konnte nicht geladen werden.</p>';
+        return;
+    }
+    if (!data.days || data.days.length === 0) {
+        container.innerHTML = '<p>Keine Dateien für diesen Filter.</p>';
+        return;
+    }
+    container.innerHTML = data.days.map(day => `
+        <div class="timeline-day-row" data-date="${escapeHtml(day.date)}" data-loaded="0">
+            <h3 class="timeline-day-header">${escapeHtml(day.date)} <small>(${day.count})</small></h3>
+            <div class="thumb-grid timeline-day-grid">
+                <p class="timeline-day-placeholder"><small>Scrollen zum Laden…</small></p>
+            </div>
+        </div>`).join('');
+    observeTimelineDays();
+}
+
+function observeTimelineDays() {
+    if (timelineObserver) timelineObserver.disconnect();
+    timelineObserver = new IntersectionObserver(onDayIntersect, { rootMargin: '400px 0px' });
+    document.querySelectorAll('.timeline-day-row').forEach(el => timelineObserver.observe(el));
+}
+
+function onDayIntersect(entries) {
+    for (const entry of entries) {
+        const row = entry.target;
+        if (entry.isIntersecting) {
+            if (row.dataset.loaded === '0') loadTimelineDay(row);
+        } else if (row.dataset.loaded === '1') {
+            unloadTimelineDay(row);
+        }
+    }
+}
+
+async function loadTimelineDay(row) {
+    row.dataset.loaded = '1';
+    const grid = row.querySelector('.timeline-day-grid');
+    const params = buildFilterParams();
+    params.set('date', row.dataset.date);
+    grid.innerHTML = '<p class="timeline-day-placeholder"><small>Lädt…</small></p>';
+    try {
+        const r = await fetch(`/api/files/timeline/day?${params}`);
         const data = await r.json();
-        showFlash('✅ ' + data.message);
+        grid.innerHTML = (data.files || []).map(timelineTileHtml).join('') || '<p><small>–</small></p>';
+    } catch (e) {
+        grid.innerHTML = '<p><small>Fehler beim Laden</small></p>';
+        row.dataset.loaded = '0';
+    }
+}
+
+function unloadTimelineDay(row) {
+    row.dataset.loaded = '0';
+    const grid = row.querySelector('.timeline-day-grid');
+    grid.innerHTML = '<p class="timeline-day-placeholder"><small>Scrollen zum Laden…</small></p>';
+}
+
+function timelineTileHtml(f) {
+    const hasThumb = !!f.thumbnail_path;
+    const icon = { documents: '📄', audio: '🎵', video: '🎬', images: '🖼' }[f.content_type] || '📁';
+    // Google-Photos-Stil: nur Vorschaubild (bzw. Icon als Fallback), keine Dateinamen.
+    const inner = hasThumb
+        ? `<img src="/api/files/${f.id}/thumbnail" alt="" loading="lazy" onerror="this.parentElement.classList.add('thumb-fallback');this.remove()">`
+        : `<div class="thumb-tile-icon">${icon}</div>`;
+    return `
+    <div class="thumb-tile ${hasThumb ? '' : 'thumb-fallback'}"
+         data-name="${escapeHtml(f.original_filename)}"
+         data-type="${escapeHtml(f.content_type || '')}"
+         data-date="${escapeHtml((f.created_at || f.imported_at || '').slice(0, 10))}"
+         data-size="${f.file_size || 0}"
+         data-tags="${escapeHtml((f.tags || []).join(', '))}"
+         data-summary="${escapeHtml(f.ai_summary || '')}"
+         onmouseenter="showTooltip(event, this)" onmouseleave="hideTooltip()"
+         onclick="openDetail(event, '${f.id}')">
+        ${inner}
+    </div>`;
+}
+
+let tooltipEl = null;
+function showTooltip(evt, el) {
+    const d = el.dataset;
+    const typeLabels = { documents: 'Dokument', audio: 'Audio', video: 'Video', images: 'Bild' };
+    const sizeKb = d.size ? (Number(d.size) / 1024).toFixed(1) + ' KB' : '';
+    const rows = [];
+    if (d.name) rows.push(`<strong>${escapeHtml(d.name)}</strong>`);
+    const meta = [typeLabels[d.type] || d.type, d.date, sizeKb].filter(Boolean).join(' · ');
+    if (meta) rows.push(`<span class="thumb-tooltip-meta">${escapeHtml(meta)}</span>`);
+    if (d.tags) rows.push(`<span class="thumb-tooltip-tags">🏷 ${escapeHtml(d.tags)}</span>`);
+    if (d.summary) rows.push(`<span class="thumb-tooltip-summary">${escapeHtml(d.summary)}</span>`);
+    if (!rows.length) return;
+    tooltipEl = document.createElement('div');
+    tooltipEl.className = 'thumb-tooltip';
+    tooltipEl.innerHTML = rows.join('<br>');
+    document.body.appendChild(tooltipEl);
+    positionTooltip(el);
+}
+function positionTooltip(el) {
+    if (!tooltipEl) return;
+    const rect = el.getBoundingClientRect();
+    const ttRect = tooltipEl.getBoundingClientRect();
+    let left = rect.left + window.scrollX;
+    let top = rect.bottom + window.scrollY + 6;
+    // Nicht rechts aus dem Fenster laufen
+    if (left + ttRect.width > window.scrollX + window.innerWidth - 8) {
+        left = window.scrollX + window.innerWidth - ttRect.width - 8;
+    }
+    // Bei zu wenig Platz unten oberhalb der Kachel anzeigen
+    if (rect.bottom + ttRect.height + 12 > window.innerHeight) {
+        top = rect.top + window.scrollY - ttRect.height - 6;
+    }
+    tooltipEl.style.left = `${Math.max(8, left)}px`;
+    tooltipEl.style.top = `${Math.max(8, top)}px`;
+}
+function hideTooltip() {
+    if (tooltipEl) { tooltipEl.remove(); tooltipEl = null; }
+}
+
+
+
+async function deleteFileRow(fileId) {
+    if (!confirm('Datei als gelöscht markieren?')) return;
+    await fetch(`/api/files/${fileId}/delete`, { method: 'POST' });
+    reloadFiles();
+}
+
+async function reprocessFile(fileId) {
+    try {
+        await fetch(`/api/files/${fileId}/reprocess`, { method: 'POST' });
     } catch(e) {
         showFlash('❌ Fehler: ' + e.message);
     }
+}
+
+function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.appendChild(document.createTextNode(text || ''));
+    return d.innerHTML;
 }
 
 function showFlash(msg) {
@@ -93,3 +559,4 @@ function showFlash(msg) {
 }
 </script>
 {% endblock %}
+

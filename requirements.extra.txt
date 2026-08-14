@@ -8,6 +8,10 @@ openai-whisper>=20231117
 # CLIP – echte Cross-Modal Bild-/Text-Embeddings
 open-clip-torch>=2.24.0
 
+# CLAP – Audio-/Musik-Ähnlichkeitssuche (Text→Musik-Suche, Musik-Ähnlichkeit)
+transformers>=4.40.0
+librosa>=0.10.0
+
 # Gesichtserkennung (zieht dlib; benötigt cmake + Build-Tools beim Bau)
 face-recognition>=1.3.0
 

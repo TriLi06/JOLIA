@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 
@@ -43,7 +43,7 @@ def build_document_md(
     ai_summary: str = "",
 ) -> str:
     if processed_at is None:
-        processed_at = datetime.now(timezone.utc).isoformat()
+        processed_at = datetime.now().isoformat()
 
     meta_lines = "\n".join(f"- **{k}:** {v}" for k, v in metadata.items())
 
@@ -77,7 +77,7 @@ def build_image_md(
     ai_summary: str = "",
 ) -> str:
     if processed_at is None:
-        processed_at = datetime.now(timezone.utc).isoformat()
+        processed_at = datetime.now().isoformat()
 
     meta_lines = "\n".join(f"- **{k}:** {v}" for k, v in metadata.items())
 
@@ -113,7 +113,7 @@ def build_audio_md(
     processed_at: str | None = None,
 ) -> str:
     if processed_at is None:
-        processed_at = datetime.now(timezone.utc).isoformat()
+        processed_at = datetime.now().isoformat()
 
     meta_lines = "\n".join(f"- **{k}:** {v}" for k, v in audio_metadata.items())
     transcript_section = f"\n## Transkript\n\n{transcript}" if transcript else ""
@@ -136,7 +136,7 @@ def build_video_md(
     processed_at: str | None = None,
 ) -> str:
     if processed_at is None:
-        processed_at = datetime.now(timezone.utc).isoformat()
+        processed_at = datetime.now().isoformat()
 
     meta_lines = "\n".join(f"- **{k}:** {v}" for k, v in video_metadata.items())
     transcript_section = f"\n## Transkript\n\n{transcript}" if transcript else ""

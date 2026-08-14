@@ -64,7 +64,7 @@ def login_page(request: Request, error: str = ""):
     from app.config import get_config
     cfg = get_config()
     if not cfg.app.auth_enabled or is_authenticated(request):
-        return RedirectResponse(url="/dashboard", status_code=302)
+        return RedirectResponse(url="/files", status_code=302)
     return templates.TemplateResponse(
         request, "login.html", {"error": error, "app_name": cfg.app.app_name}
     )
@@ -75,7 +75,7 @@ def login_submit(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
-    next_url: str = Form(default="/dashboard"),
+    next_url: str = Form(default="/files"),
 ):
     from app.config import get_config
     cfg = get_config()
@@ -106,7 +106,7 @@ def login_submit(
 
     # next_url-Sicherheitsprüfung: nur relative Pfade erlaubt
     if not next_url.startswith("/") or next_url.startswith("//"):
-        next_url = "/dashboard"
+        next_url = "/files"
 
     return RedirectResponse(url=next_url, status_code=302)
 

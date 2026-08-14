@@ -11,7 +11,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/*.png'],
       manifest: {
-        name: 'DocScan – DocStoreAI',
+        name: 'DocScan – JOLIA Docs',
         short_name: 'DocScan',
         description: 'Dokumentenscanner und Archivverwaltung',
         theme_color: '#3b82f6',

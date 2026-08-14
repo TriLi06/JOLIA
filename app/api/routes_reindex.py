@@ -44,10 +44,18 @@ def reindex_vectors(background_tasks: BackgroundTasks):
 
 
 @router.post("/full")
-def reindex_full(background_tasks: BackgroundTasks):
-    """Modus B: Vollständiger Rebuild aus Archiv-Filesystem."""
-    background_tasks.add_task(_run_reindex_full)
-    return {"message": "Vollständiger Rebuild (Modus B) wurde gestartet."}
+def reindex_full(background_tasks: BackgroundTasks, resume: bool = False):
+    """Modus B: Vollständiger Rebuild aus Archiv-Filesystem.
+
+    resume=true: Setzt einen unterbrochenen Rebuild fort, statt Files/Chunks
+    zu löschen (bereits verarbeitete Dateien bleiben erhalten).
+    """
+    background_tasks.add_task(_run_reindex_full, resume)
+    message = (
+        "Fortsetzung des vollständigen Rebuilds wurde gestartet."
+        if resume else "Vollständiger Rebuild (Modus B) wurde gestartet."
+    )
+    return {"message": message}
 
 
 def _run_reindex_vectors() -> None:
@@ -62,7 +70,7 @@ def _run_reindex_vectors() -> None:
         db.close()
 
 
-def _run_reindex_full() -> None:
+def _run_reindex_full(resume: bool = False) -> None:
     from app.db.database import _SessionLocal
     from app.services import reindex_service
     if _SessionLocal is None:
@@ -70,6 +78,6 @@ def _run_reindex_full() -> None:
     db = _SessionLocal()
     try:
         cfg = get_config()
-        reindex_service.full_rebuild(db, cfg.paths.archive_root)
+        reindex_service.full_rebuild(db, cfg.paths.archive_root, resume=resume)
     finally:
         db.close()

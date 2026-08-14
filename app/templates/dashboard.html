@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Dashboard – DocStoreAI{% endblock %}
+{% block title %}Dashboard – JOLIA Docs{% endblock %}
 
 {% block content %}
 <h1>Dashboard</h1>
@@ -7,7 +7,7 @@
 {% if model_mismatch_warning %}
 <article style="border-left:4px solid var(--pico-color-orange-500); background:var(--pico-color-orange-50)">
     <p>⚠️ <strong>Index-Versionswarnung:</strong> {{ model_mismatch_warning }}
-    <a href="#" onclick="reindex('vectors')" style="margin-left:1rem">Jetzt reindizieren →</a></p>
+    <a href="/settings#wartung" style="margin-left:1rem">Jetzt in Einstellungen reindizieren →</a></p>
 </article>
 {% endif %}
 
@@ -75,16 +75,6 @@
         <button onclick="startBackup()" class="secondary">Backup jetzt starten</button>
         <div id="backup-result"></div>
     </article>
-
-    <article>
-        <h3>🔄 Reindizieren</h3>
-        <p>Vektorindex oder vollständigen Rebuild starten.</p>
-        <div class="grid">
-            <button onclick="reindex('vectors')" class="outline">Nur Vektoren</button>
-            <button onclick="reindex('full')" class="outline secondary">Vollständiger Rebuild</button>
-        </div>
-        <div id="reindex-result"></div>
-    </article>
 </div>
 
 <!-- Zuletzt importierte Dateien -->
@@ -149,16 +139,5 @@ async function startBackup() {
     }
 }
 
-async function reindex(mode) {
-    const result = document.getElementById('reindex-result');
-    result.innerHTML = '<p>⏳ Reindizierung wird gestartet…</p>';
-    try {
-        const r = await fetch(`/api/reindex/${mode}`, { method: 'POST' });
-        const data = await r.json();
-        result.innerHTML = `<p class="success">✅ ${data.message}</p>`;
-    } catch(e) {
-        result.innerHTML = `<p class="error">❌ Fehler: ${e.message}</p>`;
-    }
-}
 </script>
 {% endblock %}

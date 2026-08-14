@@ -23,7 +23,7 @@ def get_thumbnail_path(data_dir: Path, file_id: str) -> Path:
 
 def generate_and_store(file_path: Path, file_id: str, data_dir: Path) -> str | None:
     """
-    Erzeugt ein Thumbnail für eine Bilddatei und speichert es persistent.
+    Erzeugt ein Thumbnail für eine Bild- oder PDF-Datei und speichert es persistent.
 
     Gibt den relativen Pfad zum Thumbnail zurück (relativ zu data_dir),
     oder None bei Fehler.
@@ -31,15 +31,19 @@ def generate_and_store(file_path: Path, file_id: str, data_dir: Path) -> str | N
     try:
         from PIL import Image
 
-        # HEIC-Support
-        if file_path.suffix.lower() in (".heic", ".heif"):
-            try:
-                from pillow_heif import register_heif_opener
-                register_heif_opener()
-            except ImportError:
-                pass
-
-        img = Image.open(str(file_path))
+        if file_path.suffix.lower() == ".pdf":
+            img = _render_pdf_first_page(file_path)
+            if img is None:
+                return None
+        else:
+            # HEIC-Support
+            if file_path.suffix.lower() in (".heic", ".heif"):
+                try:
+                    from pillow_heif import register_heif_opener
+                    register_heif_opener()
+                except ImportError:
+                    pass
+            img = Image.open(str(file_path))
 
         # In RGB konvertieren (JPEG unterstützt kein RGBA/P)
         if img.mode in ("RGBA", "P", "LA"):
@@ -66,6 +70,17 @@ def generate_and_store(file_path: Path, file_id: str, data_dir: Path) -> str | N
 
     except Exception as exc:
         logger.warning("Thumbnail-Erstellung fehlgeschlagen für %s: %s", file_path.name, exc)
+        return None
+
+
+def _render_pdf_first_page(file_path: Path):
+    """Rendert die erste Seite eines PDFs als PIL-Image (benötigt poppler/pdf2image)."""
+    try:
+        from pdf2image import convert_from_path
+        images = convert_from_path(str(file_path), dpi=100, first_page=1, last_page=1)
+        return images[0] if images else None
+    except Exception as exc:
+        logger.warning("PDF-Vorschau fehlgeschlagen für %s: %s", file_path.name, exc)
         return None
 
 

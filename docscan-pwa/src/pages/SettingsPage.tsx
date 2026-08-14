@@ -5,7 +5,7 @@ export default function SettingsPage() {
 
       <div className="space-y-4">
         <section className="rounded-xl bg-slate-800 p-4">
-          <h2 className="mb-3 text-sm font-semibold text-slate-300">Über DocStoreAI</h2>
+          <h2 className="mb-3 text-sm font-semibold text-slate-300">Über JOLIA Docs</h2>
           <div className="space-y-2 text-sm text-slate-400">
             <Row label="Version" value="1.0.0" />
             <Row label="Backend" value="FastAPI (Python)" />

@@ -26,9 +26,9 @@ async def lifespan(app: FastAPI):
     cfg = load_config(config_path)
 
     log_level = "DEBUG" if cfg.app.debug else "INFO"
-    setup_logging(log_level, log_file=cfg.paths.data_dir / "docstoreai.log")
+    setup_logging(log_level, log_file=cfg.paths.data_dir / "jolia.log")
 
-    logger.info("DocStoreAI startet…")
+    logger.info("JOLIA Docs startet…")
     logger.info("Inbox:    %s", cfg.paths.inbox)
     logger.info("Archiv:   %s", cfg.paths.archive_root)
 
@@ -51,19 +51,34 @@ async def lifespan(app: FastAPI):
     from app.services.chroma_service import init_chroma
     init_chroma(cfg.paths.data_dir / "chroma")
 
+    # Durch einen vorherigen Absturz unterbrochene Verarbeitung erkennen und
+    # (sequentiell im Hintergrund) erneut anstossen. Erst NACH init_chroma,
+    # da die Wiederaufnahme Embeddings schreibt.
+    try:
+        from app.services.ingestion_service import requeue_interrupted_jobs
+        requeue_interrupted_jobs()
+    except Exception:
+        logger.exception("Wiederaufnahme unterbrochener Jobs fehlgeschlagen.")
+
     # Optional: Watchdog starten
     if cfg.watcher.enabled:
         from app.services.watcher_service import start_watcher
         start_watcher(cfg)
 
-    logger.info("DocStoreAI läuft auf %s:%d", cfg.app.host, cfg.app.port)
+    # Periodischer Job-Scheduler (Face-/Location-/Duplikat-Clustering, Backup)
+    from app.services.scheduler_service import start_scheduler
+    start_scheduler(cfg)
+
+    logger.info("JOLIA Docs läuft auf %s:%d", cfg.app.host, cfg.app.port)
     yield
 
     # Shutdown
     if cfg.watcher.enabled:
         from app.services.watcher_service import stop_watcher
         stop_watcher()
-    logger.info("DocStoreAI wird beendet.")
+    from app.services.scheduler_service import stop_scheduler
+    stop_scheduler()
+    logger.info("JOLIA Docs wird beendet.")
 
 
 # ---------------------------------------------------------------------------
@@ -72,8 +87,8 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="DocStoreAI",
-        description="Lokale KI-gestützte Dokumentenverwaltung",
+        title="JOLIA Docs",
+        description="Turn Documents, Photos and Scans into Knowledge.",
         version="1.0.0",
         lifespan=lifespan,
     )
@@ -89,11 +104,11 @@ def create_app() -> FastAPI:
             _cfg = load_config()
         _session_secret = _cfg.app.auth_session_secret
     except Exception:
-        _session_secret = "docstoreai-default-session-secret"
+        _session_secret = "jolia-default-session-secret"
     app.add_middleware(
         SessionMiddleware,
         secret_key=_session_secret,
-        session_cookie="docstoreai_session",
+        session_cookie="jolia_session",
         https_only=False,  # lokale LAN-Nutzung ohne HTTPS
         max_age=86400 * 7,  # 7 Tage
     )
@@ -135,6 +150,7 @@ def create_app() -> FastAPI:
     from app.api.routes_ui import router as ui_router
     from app.api.auth import router as auth_router
     from app.api.routes_scan import router as scan_router
+    from app.api.routes_tags import router as tags_router
 
     app.include_router(auth_router, tags=["auth"])
     app.include_router(files_router, prefix="/api/files", tags=["files"])
@@ -144,15 +160,16 @@ def create_app() -> FastAPI:
     app.include_router(backup_router, prefix="/api/backup", tags=["backup"])
     app.include_router(reindex_router, prefix="/api/reindex", tags=["reindex"])
     app.include_router(scan_router, prefix="/api/scan", tags=["scan"])
+    app.include_router(tags_router, prefix="/api/tags", tags=["tags"])
     app.include_router(ui_router, tags=["ui"])
 
     @app.get("/health", tags=["system"])
     def health():
-        return {"status": "ok", "app": "DocStoreAI"}
+        return {"status": "ok", "app": "JOLIA Docs"}
 
     @app.get("/", include_in_schema=False)
     def root():
-        return RedirectResponse(url="/dashboard")
+        return RedirectResponse(url="/files")
 
     return app
 

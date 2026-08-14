@@ -19,7 +19,15 @@ def init_db(db_path: Path) -> None:
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
     db_url = f"sqlite:///{db_path.as_posix()}"
-    _engine = create_engine(db_url, connect_args={"check_same_thread": False})
+    # Pool großzügig bemessen: Watcher/Uploads können mehrere Dateien parallel
+    # verarbeiten, jede hält für die Dauer der Verarbeitung eine Session offen.
+    _engine = create_engine(
+        db_url,
+        connect_args={"check_same_thread": False},
+        pool_size=10,
+        max_overflow=20,
+        pool_timeout=60,
+    )
 
     @event.listens_for(_engine, "connect")
     def set_pragmas(dbapi_connection, _connection_record):
@@ -61,6 +69,10 @@ def _migrate_schema(engine) -> None:
             ("ai_summary", "TEXT"),
             ("thumbnail_path", "TEXT"),
             ("user_description", "TEXT"),
+            ("perceptual_hash", "VARCHAR(32)"),
+            ("sharpness_score", "FLOAT"),
+            ("best_file_id", "VARCHAR(36)"),
+            ("best_manually_set", "BOOLEAN NOT NULL DEFAULT 0"),
         ]
     }
     with engine.connect() as conn:

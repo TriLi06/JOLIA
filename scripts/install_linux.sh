@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-echo "=== DocStoreAI Linux Installation ==="
+echo "=== JOLIA Docs Linux Installation ==="
 
 # System-Abhängigkeiten
 echo "Installiere System-Pakete..."
@@ -22,6 +22,14 @@ sudo apt-get install -y \
 
 echo "System-Pakete installiert."
 
+# ffmpeg-Verfügbarkeit prüfen (für Audio/Video-Transkription via openai-whisper)
+if command -v ffmpeg >/dev/null 2>&1; then
+    echo "  ffmpeg bereits installiert."
+else
+    echo "  ⚠️  ffmpeg nicht gefunden – versuche erneute Installation..."
+    sudo apt-get install -y ffmpeg
+fi
+
 # Python Virtual Environment
 echo "Erstelle Python-Environment..."
 python3 -m venv .venv
@@ -29,6 +37,9 @@ source .venv/bin/activate
 pip install --upgrade pip --quiet
 
 # ── Schritt 1: dlib + face-recognition (cmake ist bereits via apt installiert) ──
+# face_recognition_models benötigt pkg_resources (aus setuptools); seit
+# Python 3.12 bzw. neueren pip-Versionen wird das nicht mehr automatisch mitinstalliert.
+pip install setuptools --quiet
 echo "Installiere dlib und face-recognition..."
 if pip install dlib face-recognition --quiet; then
     echo "  dlib + face-recognition installiert."
@@ -37,6 +48,19 @@ else
     echo "     Zum manuellen Nachinstallieren:"
     echo "       sudo apt-get install -y cmake build-essential libopenblas-dev liblapack-dev"
     echo "       pip install dlib face-recognition"
+fi
+
+# face_recognition installiert face_recognition_models manchmal nicht zuverlässig
+# von PyPI (Modelldaten-Paket, kein Wheel) – explizit prüfen und via Git nachziehen.
+if ! pip show face_recognition_models >/dev/null 2>&1; then
+    echo "Installiere face_recognition_models (Modelldaten)..."
+    if pip install git+https://github.com/ageitgey/face_recognition_models --quiet; then
+        echo "  face_recognition_models installiert."
+    else
+        echo "  ⚠️  face_recognition_models fehlgeschlagen – Gesichtserkennung nicht verfügbar."
+    fi
+else
+    echo "  face_recognition_models bereits installiert."
 fi
 
 # ── Schritt 2: openai-whisper ─────────────────────────────────────────────────

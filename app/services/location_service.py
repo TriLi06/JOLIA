@@ -10,10 +10,13 @@ import json
 import logging
 import math
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
+
+from app.config import get_config
+from app.services import archive_service
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +60,9 @@ def rebuild_location_clusters(db: Session, eps_km: float = 0.5) -> dict:
     file_ids: list[str] = []
 
     for f in image_files:
-        gps = extract_gps_from_sidecar(Path(f.archive_path))
+        if not f.archive_path:
+            continue
+        gps = extract_gps_from_sidecar(archive_service.resolve_archive_path(f.archive_path, get_config().paths.archive_root))
         if gps:
             coords.append(gps)
             file_ids.append(f.id)
@@ -77,7 +82,7 @@ def rebuild_location_clusters(db: Session, eps_km: float = 0.5) -> dict:
     db.query(LocationCluster).delete()
     db.commit()
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now().isoformat()
     cluster_map: dict[int, str] = {}
 
     # Cluster-Zentren berechnen und erstellen

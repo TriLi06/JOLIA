@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de" data-theme="light">
+<html lang="de" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -16,13 +16,13 @@
         <article class="login-card">
             <header>
                 <h2>🗄 {{ app_name }}</h2>
-                <p>Bitte melde dich an, um fortzufahren.</p>
+                <p>Turn Documents, Photos and Scans into Knowledge.</p>
             </header>
             {% if error %}
             <p style="color:var(--pico-color-red-500)">⚠️ {{ error }}</p>
             {% endif %}
             <form method="post" action="/auth/login">
-                <input type="hidden" name="next_url" value="{{ request.query_params.get('next', '/dashboard') }}">
+                <input type="hidden" name="next_url" value="{{ request.query_params.get('next', '/files') }}">
                 <label for="username">Benutzername</label>
                 <input type="text" id="username" name="username" required autofocus
                        placeholder="admin">

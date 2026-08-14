@@ -71,6 +71,9 @@ class AudioProcessor(BaseProcessor):
         for c in chunks:
             c.chunk_type = "description" if summary else ("transcript" if transcript else "description")
 
+        if getattr(config.processing, "enable_clap_embeddings", False):
+            self._store_clap_embedding(file_path, file_record, config, audio_meta, search_text)
+
         return ProcessingResult(
             success=True,
             chunks=chunks,
@@ -78,6 +81,36 @@ class AudioProcessor(BaseProcessor):
             sidecar_json_path=str(json_path),
             sidecar_md_path=str(md_path),
         )
+
+    def _store_clap_embedding(self, file_path: Path, file_record, config, audio_meta: dict, text_repr: str) -> None:
+        """Berechnet einen CLAP-Audiovektor und speichert ihn in ChromaDB für
+        Musik-Ähnlichkeitssuche und Text→Musik-Suche im Chat."""
+        try:
+            from app.services import chroma_service
+            from app.services.clap_service import embed_audio
+            clap_vec = embed_audio(
+                file_path,
+                model_name=config.models.clap_model,
+                max_seconds=getattr(config.processing, "clap_max_audio_seconds", 30),
+            )
+            chroma_service.upsert_chunks(
+                collection_name="audio_embeddings",
+                ids=[f"clap_{file_record.id}"],
+                texts=[text_repr],
+                embeddings=[clap_vec],
+                metadatas=[{
+                    "file_id": file_record.id,
+                    "source_path": file_record.archive_path,
+                    "file_name": file_record.original_filename,
+                    "content_type": "audio",
+                    "artist": audio_meta.get("artist", ""),
+                    "title": audio_meta.get("title", ""),
+                    "genre": audio_meta.get("genre", ""),
+                }],
+            )
+            logger.info("CLAP-Embedding gespeichert für %s", file_record.original_filename)
+        except Exception as exc:
+            logger.warning("CLAP-Embedding fehlgeschlagen für %s: %s", file_record.original_filename, exc)
 
     def _extract_metadata(self, file_path: Path) -> dict:
         try:

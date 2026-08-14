@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -23,7 +23,10 @@ def is_available() -> bool:
     try:
         import face_recognition  # noqa: F401
         return True
-    except ImportError:
+    except (ImportError, SystemExit) as exc:
+        # face_recognition/api.py calls quit() (-> SystemExit) if its model
+        # package fails to import, so we must catch that too, not just ImportError.
+        logger.warning("face_recognition nicht verfügbar: %s", exc)
         return False
 
 
@@ -60,7 +63,7 @@ def detect_and_store_faces(file_path: Path, file_id: str, db: Session) -> int:
         return 0
 
     from app.db.models import FaceEncoding
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now().isoformat()
 
     for i, (encoding, location) in enumerate(zip(encodings, locations)):
         top, right, bottom, left = location
@@ -108,12 +111,19 @@ def rebuild_person_clusters(db: Session) -> dict:
     # Wir merken uns, welche Encodings in welchem Cluster mit welchem Label waren.
     # Strategie: Wenn die Mehrheit der Encodings eines neuen Clusters vorher dasselbe
     # benannte Cluster hatte, wird das Label übernommen.
-    old_encodings_by_id = {fe.id: fe for fe in all_encodings}
     old_cluster_labels: dict[str, str] = {}
     existing_clusters = db.query(PersonCluster).all()
     for c in existing_clusters:
         if c.label and not c.label.startswith("Person "):
             old_cluster_labels[c.id] = c.label
+
+    # Alte Cluster-Zuordnung je Gesicht sichern, BEVOR die Cluster gelöscht werden.
+    # Nach dem DELETE + commit wird fe.cluster_id (ON DELETE SET NULL bzw. Session-Expiry)
+    # auf NULL zurückgesetzt - würden wir es erst in der Abstimmungsschleife lesen, gingen
+    # alle manuell vergebenen Personennamen bei jedem Re-Clustering verloren.
+    old_face_cluster: dict[str, str] = {
+        fe.id: fe.cluster_id for fe in all_encodings if fe.cluster_id
+    }
 
     # Bestehende Cluster löschen
     db.query(PersonCluster).delete()
@@ -121,7 +131,7 @@ def rebuild_person_clusters(db: Session) -> dict:
 
     # Cluster-Mapping: dbscan_label → PersonCluster
     cluster_map: dict[int, str] = {}
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now().isoformat()
 
     # Für jedes neue DBSCAN-Cluster prüfen ob ein manueller Name übernommen werden kann
     dbscan_label_to_faces: dict[int, list] = {}
@@ -133,8 +143,9 @@ def rebuild_person_clusters(db: Session) -> dict:
         # Versuche dominantes altes Label zu finden
         old_label_votes: dict[str, int] = {}
         for fe in faces_in_cluster:
-            if fe.cluster_id and fe.cluster_id in old_cluster_labels:
-                name = old_cluster_labels[fe.cluster_id]
+            old_cid = old_face_cluster.get(fe.id)
+            if old_cid and old_cid in old_cluster_labels:
+                name = old_cluster_labels[old_cid]
                 old_label_votes[name] = old_label_votes.get(name, 0) + 1
         if old_label_votes:
             inherited_label = max(old_label_votes, key=old_label_votes.__getitem__)
@@ -182,6 +193,93 @@ def get_all_clusters(db: Session) -> list[dict]:
     ]
 
 
+def _is_auto_label(label: str | None) -> bool:
+    """True für leere oder automatisch generierte Labels ('Person N')."""
+    if not label or not label.strip():
+        return True
+    return label.strip().startswith("Person ")
+
+
+def get_person_groups(db: Session) -> list[dict]:
+    """Fasst Cluster mit identischem (manuell vergebenem) Namen zu einer Person zusammen.
+
+    Mehrere DBSCAN-Cluster können dieselbe Person unter unterschiedlichen
+    Bedingungen (z.B. Beleuchtung) zeigen. Wurde ihnen derselbe Name gegeben
+    (bzw. wurden sie zusammengeführt), erscheinen sie hier als EINE Person.
+    Unbenannte Cluster bleiben jeweils eigenständig.
+    """
+    clusters = get_all_clusters(db)
+
+    named: dict[str, dict] = {}
+    groups: list[dict] = []
+
+    for c in clusters:
+        label = (c["label"] or "").strip()
+        if _is_auto_label(label):
+            groups.append(
+                {
+                    "key": c["id"],
+                    "label": label,  # ggf. "Person N" oder leer
+                    "named": False,
+                    "cluster_ids": [c["id"]],
+                    "face_count": c["face_count"],
+                    "thumb_cluster_id": c["id"],
+                    "thumb_face_count": c["face_count"],
+                }
+            )
+            continue
+
+        g = named.get(label)
+        if g is None:
+            g = {
+                "key": "name:" + label,
+                "label": label,
+                "named": True,
+                "cluster_ids": [c["id"]],
+                "face_count": c["face_count"],
+                "thumb_cluster_id": c["id"],
+                "thumb_face_count": c["face_count"],
+            }
+            named[label] = g
+            groups.append(g)
+        else:
+            g["cluster_ids"].append(c["id"])
+            g["face_count"] += c["face_count"]
+            # Thumbnail vom Cluster mit den meisten Gesichtern nehmen
+            if c["face_count"] > g["thumb_face_count"]:
+                g["thumb_cluster_id"] = c["id"]
+                g["thumb_face_count"] = c["face_count"]
+
+    # Benannte Personen alphabetisch zuerst, dann unbenannte nach Fotoanzahl
+    groups.sort(
+        key=lambda g: (
+            0 if g["named"] else 1,
+            g["label"].lower() if g["named"] else "",
+            -g["face_count"],
+        )
+    )
+    return groups
+
+
+def set_label_for_clusters(db: Session, cluster_ids: list[str], label: str) -> int:
+    """Setzt bei mehreren Clustern denselben Namen (= Zusammenführen zu einer Person)."""
+    from app.db.models import PersonCluster
+
+    label = (label or "").strip()
+    if not label or not cluster_ids:
+        return 0
+    now = datetime.now().isoformat()
+    updated = 0
+    for cid in cluster_ids:
+        cluster = db.get(PersonCluster, cid)
+        if cluster:
+            cluster.label = label
+            cluster.updated_at = now
+            updated += 1
+    db.commit()
+    return updated
+
+
 def get_files_for_cluster(db: Session, cluster_id: str) -> list[str]:
     """Gibt alle file_ids zurück, die Gesichter aus diesem Cluster enthalten."""
     from app.db.models import FaceEncoding
@@ -193,3 +291,49 @@ def get_files_for_cluster(db: Session, cluster_id: str) -> list[str]:
         .all()
     )
     return [r.file_id for r in rows]
+
+
+def get_person_names_for_file(db: Session, file_id: str) -> list[str]:
+    """Gibt die benannten Personen zurück, deren Gesichter in einer Datei erkannt wurden.
+
+    Automatisch generierte Cluster-Labels ("Person N") werden ausgeblendet -
+    nur manuell vergebene Namen gelten als "Personen-Tags".
+    """
+    from app.db.models import FaceEncoding, PersonCluster
+
+    rows = (
+        db.query(PersonCluster.label)
+        .join(FaceEncoding, FaceEncoding.cluster_id == PersonCluster.id)
+        .filter(FaceEncoding.file_id == file_id)
+        .filter(PersonCluster.label.isnot(None))
+        .distinct()
+        .all()
+    )
+    names = [
+        r.label.strip()
+        for r in rows
+        if r.label and r.label.strip() and not r.label.strip().startswith("Person ")
+    ]
+    # Deduplizieren unter Beibehaltung der Reihenfolge, alphabetisch sortiert
+    return sorted(dict.fromkeys(names))
+
+
+def get_person_names_for_files(db: Session, file_ids: list[str]) -> dict[str, list[str]]:
+    """Wie get_person_names_for_file, aber gebündelt für mehrere Dateien (eine Query)."""
+    from app.db.models import FaceEncoding, PersonCluster
+
+    if not file_ids:
+        return {}
+    rows = (
+        db.query(FaceEncoding.file_id, PersonCluster.label)
+        .join(PersonCluster, FaceEncoding.cluster_id == PersonCluster.id)
+        .filter(FaceEncoding.file_id.in_(file_ids))
+        .filter(PersonCluster.label.isnot(None))
+        .distinct()
+        .all()
+    )
+    result: dict[str, set[str]] = {}
+    for file_id, label in rows:
+        if label and label.strip() and not label.strip().startswith("Person "):
+            result.setdefault(file_id, set()).add(label.strip())
+    return {fid: sorted(names) for fid, names in result.items()}

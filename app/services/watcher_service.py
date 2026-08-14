@@ -58,13 +58,16 @@ def _process_in_background(file_id: str) -> None:
     if _SessionLocal is None:
         logger.error("Watcher: _process_in_background – Datenbank nicht initialisiert.")
         return
-    db = _SessionLocal()
-    try:
-        ingestion_service.process_file(file_id, db)
-    except Exception:
-        logger.exception("Watcher: Fehler bei der Verarbeitung von Datei %s.", file_id)
-    finally:
-        db.close()
+    # Semaphore VOR dem Öffnen der DB-Session erwerben, damit nicht mehr Sessions
+    # gleichzeitig offen sind als der Connection-Pool erlaubt (siehe ingestion_service).
+    with ingestion_service._get_processing_semaphore():
+        db = _SessionLocal()
+        try:
+            ingestion_service.process_file(file_id, db)
+        except Exception:
+            logger.exception("Watcher: Fehler bei der Verarbeitung von Datei %s.", file_id)
+        finally:
+            db.close()
 
 
 # ---------------------------------------------------------------------------

@@ -2,14 +2,14 @@ app:
   host: "0.0.0.0"
   port: 8080
   debug: false
-  app_name: "DocStoreAI"
+  app_name: "JOLIA Docs"
 
 paths:
   inbox: "/mnt/fritzbox/inbox"
   archive_root: "/home/docstore/source_documents"
   data_dir: "/home/docstore/data"
   temp_dir: "/home/docstore/data/temp"
-  backup_target: "/mnt/external_backup/docstoreai_backup"
+  backup_target: "/mnt/external_backup/jolia_backup"
 
 models:
   embedding_model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
@@ -30,8 +30,14 @@ processing:
   ocr_languages: "deu+eng"
   ocr_confidence_threshold: 60
   video_thumbnail_offset_pct: 10
+  duplicate_hash_threshold: 8
+  duplicate_time_window_seconds: 120
 
 watcher:
   enabled: false
   scan_interval_seconds: 60
   stability_threshold_seconds: 30
+
+scheduled_jobs:
+  clustering: { enabled: true, interval_seconds: 3600 }
+  backup: { enabled: true, interval_seconds: 86400 }

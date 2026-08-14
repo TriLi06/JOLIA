@@ -2,7 +2,7 @@ app:
   host: "0.0.0.0"
   port: 8080
   debug: false
-  app_name: "DocStoreAI"
+  app_name: "JOLIA Docs"
   # Phase E: Authentifizierung (deaktiviert = kein Login erforderlich)
   auth_enabled: false
   auth_username: "admin"
@@ -16,7 +16,7 @@ paths:
   archive_root: "/home/docstore/source_documents"
   data_dir: "/home/docstore/data"
   temp_dir: "/home/docstore/data/temp"
-  backup_target: "/mnt/external_backup/docstoreai_backup"
+  backup_target: "/mnt/external_backup/jolia_backup"
 
 models:
   embedding_model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
@@ -30,6 +30,10 @@ models:
   # Phase B: OpenCLIP (Bild-Ähnlichkeitssuche)
   clip_model: "ViT-B-32"
   clip_pretrained: "openai"
+  # CLAP (Audio-/Musik-Ähnlichkeitssuche, Text→Musik-Suche); lädt automatisch von HuggingFace Hub
+  clap_model: "laion/larger_clap_music"
+  # Nur setzen falls huggingface.co nicht erreichbar ist (z.B. gesperrtes Netzwerk):
+  # hf_endpoint: "https://hf-mirror.com"
 
 processing:
   chunk_size: 1000
@@ -44,7 +48,10 @@ processing:
   video_thumbnail_offset_pct: 10
   # Phase B: Erweiterte Bild-Features (erfordert optionale Pakete)
   enable_clip_embeddings: false    # open-clip-torch erforderlich
+  enable_clap_embeddings: false    # transformers + librosa erforderlich
   enable_face_detection: false     # face-recognition + scikit-learn erforderlich
+  duplicate_hash_threshold: 8       # pHash-Hammingdistanz: kleiner = strenger
+  duplicate_time_window_seconds: 120
 
 watcher:
   enabled: false
@@ -52,3 +59,7 @@ watcher:
   # Mindest-Ruhezeit (Sekunden) einer Datei bevor sie importiert wird.
   # Verhindert, dass Dateien importiert werden, die noch kopiert werden.
   stability_threshold_seconds: 30
+
+scheduled_jobs:
+  clustering: { enabled: true, interval_seconds: 3600 }
+  backup: { enabled: true, interval_seconds: 86400 }

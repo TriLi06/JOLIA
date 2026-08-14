@@ -1,9 +1,9 @@
-# DocStoreAI – Windows Entwicklungsstart
+# JOLIA Docs – Windows Entwicklungsstart
 # Dieses Skript richtet die Entwicklungsumgebung ein und startet die App.
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== DocStoreAI – Windows Entwicklungsstart ===" -ForegroundColor Cyan
+Write-Host "=== JOLIA Docs – Windows Entwicklungsstart ===" -ForegroundColor Cyan
 
 # Virtual Environment anlegen falls nicht vorhanden
 if (-Not (Test-Path ".venv")) {
@@ -70,6 +70,10 @@ if ($reqHash -ne $lastHash) {
 
     # ── Schritt 3: face-recognition (nur wenn dlib vorhanden) ────────────────────
     if ($dlibOk) {
+        # face_recognition_models benötigt pkg_resources (aus setuptools); seit
+        # Python 3.12 bzw. neueren pip-Versionen wird das nicht mehr automatisch mitinstalliert.
+        pip install setuptools --quiet
+
         $frOk = pip show face-recognition 2>$null
         if (-not $frOk) {
             Write-Host "  Installiere face-recognition..." -ForegroundColor Yellow
@@ -81,6 +85,21 @@ if ($reqHash -ne $lastHash) {
             }
         } else {
             Write-Host "  face-recognition bereits installiert." -ForegroundColor Green
+        }
+
+        # face_recognition installiert face_recognition_models manchmal nicht zuverlässig
+        # von PyPI (Modelldaten-Paket, kein Wheel) – explizit prüfen und via Git nachziehen.
+        $frModelsOk = pip show face_recognition_models 2>$null
+        if (-not $frModelsOk) {
+            Write-Host "  Installiere face_recognition_models (Modelldaten)..." -ForegroundColor Yellow
+            pip install git+https://github.com/ageitgey/face_recognition_models --quiet
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  face_recognition_models installiert." -ForegroundColor Green
+            } else {
+                Write-Host "  ⚠️  face_recognition_models fehlgeschlagen – Gesichtserkennung nicht verfügbar." -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "  face_recognition_models bereits installiert." -ForegroundColor Green
         }
     }
 
@@ -98,7 +117,50 @@ if ($reqHash -ne $lastHash) {
         Write-Host "  openai-whisper bereits installiert." -ForegroundColor Green
     }
 
-    # ── Schritt 5: restliche requirements.txt installieren ───────────────────────
+    # ── Schritt 5: ffmpeg (für Audio/Video-Transkription via openai-whisper) ─────
+    $ffmpegOk = Get-Command ffmpeg -ErrorAction SilentlyContinue
+    if (-not $ffmpegOk) {
+        $wingetOk = Get-Command winget -ErrorAction SilentlyContinue
+        if ($wingetOk) {
+            Write-Host "  Installiere ffmpeg via winget..." -ForegroundColor Yellow
+            winget install --id Gyan.FFmpeg --silent --accept-source-agreements --accept-package-agreements
+            if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+                Write-Host "  ffmpeg installiert." -ForegroundColor Green
+            } else {
+                Write-Host "  ⚠️  ffmpeg-Installation via winget fehlgeschlagen oder erfordert einen neuen Terminal-Start." -ForegroundColor Yellow
+                Write-Host "     Manuell: winget install --id Gyan.FFmpeg" -ForegroundColor DarkGray
+            }
+        } else {
+            Write-Host "  ⚠️  winget nicht gefunden – ffmpeg konnte nicht automatisch installiert werden." -ForegroundColor Yellow
+            Write-Host "     Manuell: winget install --id Gyan.FFmpeg (oder https://ffmpeg.org/download.html)" -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host "  ffmpeg bereits installiert." -ForegroundColor Green
+    }
+
+    # ── Schritt 5b: poppler (für PDF-Vorschaubilder via pdf2image) ──────────────
+    $popplerOk = Get-Command pdftoppm -ErrorAction SilentlyContinue
+    if (-not $popplerOk) {
+        $wingetOk = Get-Command winget -ErrorAction SilentlyContinue
+        if ($wingetOk) {
+            Write-Host "  Installiere poppler via winget..." -ForegroundColor Yellow
+            winget install --id oschwartz10612.Poppler --silent --accept-source-agreements --accept-package-agreements
+            if (Get-Command pdftoppm -ErrorAction SilentlyContinue) {
+                Write-Host "  poppler installiert." -ForegroundColor Green
+            } else {
+                Write-Host "  ⚠️  poppler-Installation via winget fehlgeschlagen oder erfordert einen neuen Terminal-Start." -ForegroundColor Yellow
+                Write-Host "     Manuell: winget install --id oschwartz10612.Poppler (oder https://github.com/oschwartz10612/poppler-windows/releases)" -ForegroundColor DarkGray
+                Write-Host "     Ohne poppler funktionieren PDF-Vorschaubilder nicht (App läuft trotzdem normal)." -ForegroundColor DarkGray
+            }
+        } else {
+            Write-Host "  ⚠️  winget nicht gefunden – poppler konnte nicht automatisch installiert werden." -ForegroundColor Yellow
+            Write-Host "     Manuell: https://github.com/oschwartz10612/poppler-windows/releases (bin-Ordner zum PATH hinzufügen)" -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host "  poppler bereits installiert." -ForegroundColor Green
+    }
+
+    # ── Schritt 6: restliche requirements.txt installieren ───────────────────────
     # dlib, face-recognition und openai-whisper sind bereits oben behandelt.
     # torch ebenfalls; pip überspringt bereits installierte Pakete automatisch.
     Write-Host "  Installiere verbleibende Abhängigkeiten..." -ForegroundColor Yellow
@@ -134,9 +196,9 @@ if (-Not (Test-Path ".env")) {
 }
 
 # Testverzeichnisse anlegen
-New-Item -ItemType Directory -Force -Path "C:\dev\docstoreai-test\inbox" | Out-Null
-New-Item -ItemType Directory -Force -Path "C:\dev\docstoreai-test\source_documents" | Out-Null
-New-Item -ItemType Directory -Force -Path "C:\dev\docstoreai-test\data" | Out-Null
+New-Item -ItemType Directory -Force -Path "C:\dev\jolia-test\inbox" | Out-Null
+New-Item -ItemType Directory -Force -Path "C:\dev\jolia-test\source_documents" | Out-Null
+New-Item -ItemType Directory -Force -Path "C:\dev\jolia-test\data" | Out-Null
 
 Write-Host ""
 
@@ -200,7 +262,7 @@ if ($ollamaRunning -and $ollamaExe) {
 }
 
 Write-Host ""
-Write-Host "Starte DocStoreAI auf http://127.0.0.1:8081 ..." -ForegroundColor Green
+Write-Host "Starte JOLIA Docs auf http://127.0.0.1:8081 ..." -ForegroundColor Green
 
 # --reload-dir app: nur Änderungen im app/-Verzeichnis triggern einen Neustart
 # (nicht Datenbankdateien, Logs oder andere Daten)

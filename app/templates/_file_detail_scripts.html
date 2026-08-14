@@ -1,0 +1,281 @@
+<script>
+var FILE_ID = '{{ file.id }}';
+
+async function loadFileTags() {
+    const badges = document.getElementById('tags-badges');
+    const datalist = document.getElementById('tag-datalist');
+    if (!badges) return;
+    try {
+        const [tagsRes, allTagsRes] = await Promise.all([
+            fetch(`/api/files/${FILE_ID}/tags`),
+            fetch('/api/tags'),
+        ]);
+        const tagsData = await tagsRes.json();
+        const allTagsData = await allTagsRes.json();
+        renderTagBadges(tagsData.items || []);
+        if (datalist) {
+            datalist.innerHTML = (allTagsData.items || [])
+                .map(t => `<option value="${escapeHtml(t.name)}">`).join('');
+        }
+        updateFindByTagsLink(tagsData.items || []);
+    } catch (e) {
+        console.warn('Tags konnten nicht geladen werden', e);
+    }
+}
+
+function renderTagBadges(tags) {
+    const badges = document.getElementById('tags-badges');
+    if (!badges) return;
+    badges.innerHTML = tags.length
+        ? tags.map(t => `
+            <span class="tag-badge">${escapeHtml(t)}
+                <button type="button" onclick="removeFileTag('${escapeHtml(t)}')" title="Tag entfernen">×</button>
+            </span>`).join('')
+        : '<small>Noch keine Tags.</small>';
+}
+
+function updateFindByTagsLink(tags) {
+    const link = document.getElementById('find-by-tags-link');
+    if (!link) return;
+    const params = new URLSearchParams();
+    tags.forEach(t => params.append('tags', t));
+    link.href = `/files?${params}`;
+}
+
+async function addTagFromInput(fileId) {
+    const input = document.getElementById('tag-new-input');
+    const name = input.value.trim();
+    if (!name) return;
+    await addFileTag(fileId, name);
+    input.value = '';
+}
+
+async function addFileTag(fileId, name) {
+    const result = document.getElementById('tags-result');
+    try {
+        const r = await fetch(`/api/files/${fileId}/tags`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler');
+        await loadFileTags();
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+async function removeFileTag(name) {
+    const result = document.getElementById('tags-result');
+    try {
+        const r = await fetch(`/api/files/${FILE_ID}/tags/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler');
+        await loadFileTags();
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+loadFileTags();
+
+async function reprocessFile(fileId) {
+    await fetch(`/api/files/${fileId}/reprocess`, { method: 'POST' });
+    location.reload();
+}
+
+async function deleteFile(fileId) {
+    if (!confirm('Datei als gelöscht markieren? Sie wird dann in Listen/Suche ausgeblendet.')) return;
+    const r = await fetch(`/api/files/${fileId}/delete`, { method: 'POST' });
+    const data = await r.json();
+    alert(data.message);
+    location.reload();
+}
+
+async function restoreFile(fileId) {
+    const r = await fetch(`/api/files/${fileId}/restore`, { method: 'POST' });
+    const data = await r.json();
+    alert(data.message);
+    location.reload();
+}
+
+async function loadDuplicates(fileId) {
+    const section = document.getElementById('duplicate-section');
+    const strip = document.getElementById('duplicate-filmstrip');
+    if (!section || !strip) return;
+    try {
+        const r = await fetch(`/api/files/${fileId}/duplicates`);
+        if (!r.ok) return;
+        const data = await r.json();
+        if (!data.members || data.members.length < 2) return;
+        section.style.display = '';
+        strip.innerHTML = data.members.map(m => `
+            <div class="duplicate-thumb ${m.is_best ? 'is-best' : ''} ${m.id === fileId ? 'is-current' : ''}"
+                 onclick="markBest('${m.id}')" title="${escapeHtml(m.original_filename)}">
+                <img src="${m.thumbnail_url}" alt="" loading="lazy" onerror="this.style.display='none'">
+                ${m.is_best ? '<span class="best-badge">★ Beste</span>' : ''}
+                <span class="status-badge status-${m.status}">${m.status}</span>
+            </div>`).join('');
+    } catch (e) {
+        console.warn('Duplikat-Ladefehler', e);
+    }
+}
+
+async function markBest(fileId) {
+    const r = await fetch(`/api/files/${fileId}/mark-best`, { method: 'POST' });
+    const data = await r.json();
+    if (r.ok) { loadDuplicates(FILE_ID); } else { alert(data.detail || 'Fehler'); }
+}
+
+async function markGroupDeleted(fileId) {
+    if (!confirm('Alle schlechteren Aufnahmen dieser Serie als gelöscht markieren?')) return;
+    const r = await fetch(`/api/files/${fileId}/mark-group-deleted`, { method: 'POST' });
+    const data = await r.json();
+    alert(data.message);
+    loadDuplicates(FILE_ID);
+}
+
+if (document.getElementById('duplicate-section')) {
+    loadDuplicates(FILE_ID);
+}
+
+async function saveReviewText(fileId) {
+    const text = document.getElementById('review-text').value;
+    const result = document.getElementById('review-result');
+    try {
+        const r = await fetch(`/api/files/${fileId}/review-text`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+        const data = await r.json();
+        result.innerHTML = `<p class="success">✅ ${data.message}</p>`;
+    } catch(e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.appendChild(document.createTextNode(text || ''));
+    return d.innerHTML;
+}
+
+async function loadSimilar(endpoint, label) {
+    const status = document.getElementById('similar-status');
+    const results = document.getElementById('similar-results');
+    status.innerHTML = `<p>🔍 Lade ${escapeHtml(label)}…</p>`;
+    results.innerHTML = '';
+    try {
+        const r = await fetch(`/api/files/${FILE_ID}/${endpoint}`);
+        if (!r.ok) {
+            const err = await r.json();
+            status.innerHTML = `<p class="error">❌ ${escapeHtml(err.detail || 'Fehler')}</p>`;
+            return;
+        }
+        const data = await r.json();
+        status.innerHTML = `<p><strong>${data.total}</strong> Ergebnisse für „${escapeHtml(label)}"</p>`;
+        renderSimilarResults(data.results);
+    } catch(e) {
+        status.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+async function searchSimilarQuery() {
+    const query = document.getElementById('similar-query').value.trim();
+    if (!query) return;
+    const status = document.getElementById('similar-status');
+    const results = document.getElementById('similar-results');
+    status.innerHTML = '<p>🔍 Suche läuft…</p>';
+    results.innerHTML = '';
+    try {
+        const params = new URLSearchParams({ q: query, n: 10 });
+        const r = await fetch(`/api/search?${params}`);
+        const data = await r.json();
+        status.innerHTML = `<p><strong>${data.total}</strong> Ergebnisse für „${escapeHtml(query)}"</p>`;
+        // Konvertiere SearchResult in das SimilarResult-Format
+        const mapped = data.results.map(item => ({
+            file_id: item.file_id,
+            file_name: item.file_name,
+            source_path: item.source_path,
+            content_type: item.content_type,
+            score: item.score,
+            ai_summary: item.summary,
+            thumbnail_url: item.thumbnail_url,
+        }));
+        renderSimilarResults(mapped);
+    } catch(e) {
+        status.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+function renderSimilarResults(results) {
+    const container = document.getElementById('similar-results');
+    if (!results || results.length === 0) {
+        container.innerHTML = '<p>Keine ähnlichen Dateien gefunden.</p>';
+        return;
+    }
+    const cards = results.map(item => {
+        const thumb = item.thumbnail_url
+            ? `<img src="${item.thumbnail_url}" alt="" class="similar-card-thumb" loading="lazy" onerror="this.style.display='none'">`
+            : `<div class="similar-card-thumb" style="background:var(--secondary-background);display:flex;align-items:center;justify-content:center;font-size:1.5rem;">📄</div>`;
+        const summary = item.ai_summary ? `<div class="similar-card-summary">${escapeHtml(item.ai_summary)}</div>` : '';
+        const score = item.score < 1.0 ? ` <small>(${item.score.toFixed(2)})</small>` : '';
+        return `
+        <a href="/files/${item.file_id}" class="similar-card">
+            ${thumb}
+            <div class="similar-card-info">
+                <div class="similar-card-name">${escapeHtml(item.file_name)}${score}</div>
+                ${summary}
+            </div>
+        </a>`;
+    }).join('');
+    container.innerHTML = cards;
+}
+
+// Enter-Taste im Suchfeld
+document.getElementById('similar-query').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') searchSimilarQuery();
+});
+
+// Enter-Taste im Tag-Eingabefeld
+document.getElementById('tag-new-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); addTagFromInput(FILE_ID); }
+});
+
+async function saveUserDescription(fileId) {
+    const text = document.getElementById('user-description-text').value.trim();
+    const result = document.getElementById('user-description-result');
+    if (!text) { result.innerHTML = '<p class="error">❌ Bitte einen Text eingeben.</p>'; return; }
+    try {
+        const r = await fetch(`/api/files/${fileId}/user-description`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: text })
+        });
+        const data = await r.json();
+        result.innerHTML = `<p class="success">✅ ${data.message}</p>`;
+        setTimeout(() => location.reload(), 800);
+    } catch(e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+async function clearUserDescription(fileId) {
+    if (!confirm('Beschreibung wirklich löschen?')) return;
+    const result = document.getElementById('user-description-result');
+    try {
+        const r = await fetch(`/api/files/${fileId}/user-description`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: '' })
+        });
+        const data = await r.json();
+        result.innerHTML = `<p class="success">✅ ${data.message}</p>`;
+        setTimeout(() => location.reload(), 800);
+    } catch(e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+</script>

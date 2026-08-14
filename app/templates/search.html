@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Suche – DocStoreAI{% endblock %}
+{% block title %}Suche – JOLIA Docs{% endblock %}
 
 {% block content %}
 <h1>🔍 Semantische Suche</h1>
@@ -38,6 +38,7 @@ async function doSearch(event) {
     try {
         const params = new URLSearchParams({ q, n: 10 });
         if (contentType) params.set('content_type', contentType);
+        new URLSearchParams(window.location.search).getAll('tags').forEach(t => params.append('tags', t));
         const r = await fetch(`/api/search?${params}`);
         const data = await r.json();
 
@@ -56,7 +57,7 @@ async function doSearch(event) {
                 ? `<p class="search-summary"><em>${escapeHtml(item.summary)}</em></p>`
                 : '';
             return `
-            <article class="search-result-card ${item.content_type === 'images' ? 'search-result-image' : ''}">
+            <article class="search-result-card ${item.content_type === 'images' ? 'search-result-image' : ''}" ${item.file_id ? `onclick="openDetail(event, '${item.file_id}')" style="cursor:pointer"` : ''}>
                 <header>
                     ${thumb}
                     <div class="search-result-header-text">
@@ -69,7 +70,7 @@ async function doSearch(event) {
                 <p class="search-snippet">${escapeHtml(item.text)}</p>
                 <footer>
                     <small>${escapeHtml(item.source_path)}${item.page ? ' · Seite ' + item.page : ''}</small>
-                    ${item.file_id ? `<a href="/files/${item.file_id}" role="button" class="outline secondary small">📄 Dokument öffnen</a>` : ''}
+                    ${item.file_id ? `<a href="/files/${item.file_id}" role="button" class="outline secondary small" onclick="event.stopPropagation(); return openDetail(event, '${item.file_id}')">📄 Details</a>` : ''}
                 </footer>
             </article>
         `}).join('');
@@ -89,8 +90,12 @@ function escapeHtml(text) {
 // URL-Parameter auswerten
 const urlParams = new URLSearchParams(window.location.search);
 const preQ = urlParams.get('q');
+const preTags = urlParams.getAll('tags');
 if (preQ) {
     document.getElementById('search-input').value = preQ;
+    doSearch(new Event('submit'));
+} else if (preTags.length) {
+    document.getElementById('search-input').value = preTags.join(' ');
     doSearch(new Event('submit'));
 }
 </script>

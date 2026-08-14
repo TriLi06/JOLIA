@@ -1,6 +1,6 @@
-# DocStoreAI
+# JOLIA Docs
 
-**Lokale, KI-gestützte Dokumentenverwaltung** – vollständig ohne Cloud, ohne Docker, ohne GPU.
+**Turn Documents, Photos and Scans into Knowledge.** – vollständig lokal, ohne Cloud, ohne Docker-Zwang, ohne GPU.
 
 ---
 
@@ -49,8 +49,8 @@ Dann im Browser öffnen: **http://127.0.0.1:8080**
 Auf einem beliebigen Linux-Rechner mit **Docker** und **Docker Compose**:
 
 ```bash
-git clone <repo-url> docstoreai
-cd docstoreai
+git clone <repo-url> jolia
+cd jolia
 docker compose up -d
 ```
 
@@ -58,8 +58,8 @@ Das war's. Beim ersten Start werden Image-Build, das LLM (`qwen2.5:3b`) und das
 Embedding-Modell automatisch geladen (einmaliger Download). Danach:
 
 - **Weboberfläche:** http://localhost:8080
-- **Dateien verarbeiten:** einfach in `~/docstoreai/inbox` ablegen (Auto-Import)
-- **Daten liegen auf dem Host unter** `~/docstoreai/`
+- **Dateien verarbeiten:** einfach in `~/jolia/inbox` ablegen (Auto-Import)
+- **Daten liegen auf dem Host unter** `~/jolia/`
   (`inbox/`, `source_documents/`, `data/`) und bleiben über Neustarts erhalten
 
 Nützliche Befehle:
@@ -91,8 +91,8 @@ entsprechend groß. Die optionalen Pakete stehen in
 
 ```bash
 # Repository klonen
-git clone <repo-url> docstoreai
-cd docstoreai
+git clone <repo-url> jolia
+cd jolia
 
 # Installation
 bash scripts/install_linux.sh

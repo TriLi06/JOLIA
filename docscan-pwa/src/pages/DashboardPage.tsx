@@ -77,8 +77,8 @@ export default function DashboardPage() {
       {/* Kopfzeile */}
       <div className="mb-5 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-white">DocStoreAI</h1>
-          <p className="text-xs text-slate-500">Lokale KI-Dokumentenverwaltung</p>
+          <h1 className="text-xl font-bold text-white">JOLIA Docs</h1>
+          <p className="text-xs text-slate-500">Turn Documents, Photos and Scans into Knowledge.</p>
         </div>
         <Link
           to="/scan"

@@ -15,7 +15,7 @@ class AppConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
     debug: bool = False
-    app_name: str = "DocStoreAI"
+    app_name: str = "JOLIA Docs"
     # Phase E: Authentifizierung
     auth_enabled: bool = False
     auth_username: str = "admin"
@@ -52,12 +52,22 @@ class ModelsConfig(BaseModel):
     clip_backend: str = "ollama"   # "ollama" (kein HF-Download) | "openclip" (lokal gecachtes Modell)
     clip_model: str = "ViT-B-32"
     clip_pretrained: str = "openai"
+    # CLAP audio similarity (huggingface transformers, Auto-Download beim ersten Gebrauch)
+    clap_model: str = "laion/larger_clap_music"  # Alternative: "laion/clap-htsat-unfused" (generisches Audio)
+    # Alternativer HuggingFace-Endpunkt falls huggingface.co nicht erreichbar ist,
+    # z.B. "https://hf-mirror.com" (Mirror). Leer = offizieller huggingface.co.
+    hf_endpoint: str = ""
 
 
 class ProcessingConfig(BaseModel):
     chunk_size: int = 1000
     chunk_overlap: int = 150
     max_file_size_mb: int = 2000
+    # Begrenzt, wie viele Dateien gleichzeitig verarbeitet werden (OCR/Embeddings/LLM).
+    # Verhindert, dass bei vielen parallelen Jobs (z.B. große PDFs + Watcher-Batch) der
+    # SQLAlchemy-Connection-Pool erschöpft wird (jeder Job hält während der gesamten
+    # Verarbeitung eine eigene DB-Session offen).
+    max_concurrent_processing: int = 3
     enable_ocr: bool = True
     enable_audio_transcription: bool = True
     enable_video_transcription: bool = True
@@ -68,6 +78,8 @@ class ProcessingConfig(BaseModel):
     # Diese wird für den Suchindex genutzt – besser für Clustering als rohes Transkript.
     enable_media_summarization: bool = True
     enable_image_ocr: bool = True
+    # Nach dem Import per KI passende Tags (Rechnung, Arzt, Urlaubsfoto, ...) vorschlagen und zuweisen.
+    enable_tag_suggestion: bool = True
     ocr_languages: str = "deu+eng"
     ocr_confidence_threshold: int = 60
     video_thumbnail_offset_pct: int = 10
@@ -76,8 +88,15 @@ class ProcessingConfig(BaseModel):
     video_frame_offset_seconds: int = 10
     # Phase B: OpenCLIP image similarity embeddings
     enable_clip_embeddings: bool = True
+    # CLAP audio similarity embeddings (requires transformers + librosa)
+    enable_clap_embeddings: bool = True
+    # Nur die ersten N Sekunden für das CLAP-Embedding nutzen (kurze Clips reichen aus)
+    clap_max_audio_seconds: int = 30
     # Phase B: Face detection (requires face_recognition package)
     enable_face_detection: bool = True
+    # Duplikat-/Serienerkennung (Bilder): pHash-Hammingdistanz-Schwelle und Zeitfenster
+    duplicate_hash_threshold: int = 8
+    duplicate_time_window_seconds: int = 120
 
 
 class WatcherConfig(BaseModel):
@@ -88,12 +107,26 @@ class WatcherConfig(BaseModel):
     stability_threshold_seconds: int = 30
 
 
+class ScheduledJobConfig(BaseModel):
+    enabled: bool = True
+    interval_seconds: int = 3600
+
+
+class ScheduledJobsConfig(BaseModel):
+    # Gesichter-/Standort-Clustering und Duplikaterkennung laufen als ein kombinierter Job
+    # (siehe scheduler_service._run_rebuild_clustering), da alle drei ohnehin ueber den
+    # kompletten Datenbestand neu rechnen.
+    clustering: ScheduledJobConfig = ScheduledJobConfig(enabled=True, interval_seconds=3600)
+    backup: ScheduledJobConfig = ScheduledJobConfig(enabled=True, interval_seconds=86400)
+
+
 class Config(BaseModel):
     app: AppConfig = AppConfig()
     paths: PathsConfig
     models: ModelsConfig = ModelsConfig()
     processing: ProcessingConfig = ProcessingConfig()
     watcher: WatcherConfig = WatcherConfig()
+    scheduled_jobs: ScheduledJobsConfig = ScheduledJobsConfig()
 
 
 _config: Optional[Config] = None
@@ -115,6 +148,13 @@ def load_config(config_path: Path = Path("config.yaml")) -> Config:
     _apply_env_overrides(data)
 
     _config = Config(**data)
+
+    # HF_ENDPOINT so früh wie möglich setzen – bevor irgendein huggingface_hub/
+    # transformers/sentence-transformers-Import stattfindet, da die Ziel-URL beim
+    # Import als Konstante eingefroren wird.
+    if _config.models.hf_endpoint:
+        os.environ.setdefault("HF_ENDPOINT", _config.models.hf_endpoint)
+
     return _config
 
 
