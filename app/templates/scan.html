@@ -3,13 +3,19 @@
 
 {% block content %}
 <h1>📷 Dokument scannen</h1>
-<p>Nimm Seiten mit der Kamera auf oder lade vorhandene Bilder hoch. Die Seiten werden in die
-Inbox gelegt und automatisch verarbeitet.</p>
+<p>Nimm Seiten mit der Kamera auf oder lade vorhandene Bilder hoch. Alle Seiten werden zu
+<strong>einem PDF mit durchsuchbarem Text</strong> zusammengefasst und automatisch verarbeitet.</p>
 
-<div class="grid scan-actions">
+<div id="dropzone" class="scan-dropzone" role="button" tabindex="0"
+     aria-label="Dateien hierher ziehen oder klicken, um Dateien auszuwählen">
+    <span class="scan-dropzone-icon" aria-hidden="true">📥</span>
+    <strong>Dateien hierher ziehen</strong>
+    <small>oder klicken, um eine oder mehrere Dateien auszuwählen – JPEG/PNG, max. 30 MB</small>
+</div>
+
+<div class="scan-actions">
     <button id="btn-camera-toggle" class="outline" type="button">📷 Live-Kamera</button>
-    <button id="btn-photo" class="outline" type="button">📸 Foto aufnehmen</button>
-    <button id="btn-file-pick" class="outline secondary" type="button">📁 Bilder auswählen</button>
+    <button id="btn-photo" class="outline" type="button" hidden>📸 Foto aufnehmen</button>
     <input type="file" id="file-input" accept="image/jpeg,image/png" multiple hidden>
     <input type="file" id="photo-input" accept="image/*" capture="environment" hidden>
 </div>
@@ -33,9 +39,12 @@ Inbox gelegt und automatisch verarbeitet.</p>
         <h2>Erfasste Seiten (<span id="page-count">0</span>)</h2>
         <div>
             <button id="btn-clear" class="outline secondary small" type="button">Alle entfernen</button>
-            <button id="btn-upload" type="button">⬆️ Hochladen &amp; verarbeiten</button>
+            <button id="btn-upload" type="button">⬆️ Als PDF hochladen</button>
         </div>
     </header>
+    <label for="doc-title">Dokumenttitel (optional)
+        <input type="text" id="doc-title" maxlength="60" placeholder="z. B. Rechnung Stadtwerke 2026">
+    </label>
     <div id="pages-grid" class="scan-pages-grid"></div>
 </section>
 {% endblock %}
@@ -55,7 +64,7 @@ Inbox gelegt und automatisch verarbeitet.</p>
         cameraToggle: document.getElementById('btn-camera-toggle'),
         photo: document.getElementById('btn-photo'),
         photoInput: document.getElementById('photo-input'),
-        filePick: document.getElementById('btn-file-pick'),
+        dropzone: document.getElementById('dropzone'),
         fileInput: document.getElementById('file-input'),
         cameraHint: document.getElementById('camera-hint'),
         cameraArea: document.getElementById('camera-area'),
@@ -70,18 +79,41 @@ Inbox gelegt und automatisch verarbeitet.</p>
         pageCount: document.getElementById('page-count'),
         clear: document.getElementById('btn-clear'),
         upload: document.getElementById('btn-upload'),
+        title: document.getElementById('doc-title'),
     };
+
+    // Alle Seiten einer Aufnahme-Session gehören zu einem Bundle -> ein PDF.
+    function newBundleId() {
+        if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+        return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0;
+            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+        });
+    }
 
     // Live-Kamera (getUserMedia) ist nur in sicheren Kontexten verfügbar
     // (HTTPS oder localhost). Über HTTP im LAN ist sie blockiert.
     const liveCameraSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+
+    // "capture" öffnet nur auf Mobilgeräten die Kamera-App; am Desktop wäre es
+    // ein zweiter Dateidialog – dort bleibt der Button ausgeblendet.
+    const captureSupported = 'capture' in document.createElement('input')
+        && window.matchMedia('(pointer: coarse)').matches;
+    els.photo.hidden = !captureSupported;
+
     if (!liveCameraSupported) {
         els.cameraToggle.disabled = true;
         els.cameraToggle.setAttribute('aria-disabled', 'true');
         els.cameraHint.hidden = false;
-        els.cameraHint.textContent = window.isSecureContext
-            ? 'Live-Kamera nicht verfügbar (kein Kamerazugriff). Nutze "📸 Foto aufnehmen" oder lade Bilder hoch.'
-            : 'Live-Kamera benötigt HTTPS oder localhost. Über das LAN (http://…) nutze "📸 Foto aufnehmen" – das öffnet die Kamera-App des Geräts.';
+        if (captureSupported) {
+            els.cameraHint.textContent = window.isSecureContext
+                ? 'Live-Kamera nicht verfügbar (kein Kamerazugriff). Nutze "📸 Foto aufnehmen" oder lege Bilder im Feld oben ab.'
+                : 'Live-Kamera benötigt HTTPS oder localhost. Über das LAN (http://…) nutze "📸 Foto aufnehmen" – das öffnet die Kamera-App des Geräts.';
+        } else {
+            els.cameraHint.textContent = window.isSecureContext
+                ? 'Live-Kamera nicht verfügbar (kein Kamerazugriff). Lege Bilder im Feld oben ab.'
+                : 'Live-Kamera benötigt HTTPS oder localhost. Über das LAN (http://…) bitte Bilder im Feld oben ablegen.';
+        }
     }
 
     function setStatus(html, type) {
@@ -137,11 +169,48 @@ Inbox gelegt und automatisch verarbeitet.</p>
         }
     }
 
-    // --- Datei-Auswahl ---
-    els.filePick.addEventListener('click', () => els.fileInput.click());
+    // --- Datei-Auswahl / Dropzone ---
     els.fileInput.addEventListener('change', () => {
         ingestFiles(els.fileInput.files);
         els.fileInput.value = '';
+    });
+
+    els.dropzone.addEventListener('click', () => els.fileInput.click());
+    els.dropzone.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            els.fileInput.click();
+        }
+    });
+
+    let dragDepth = 0;
+    els.dropzone.addEventListener('dragenter', e => {
+        e.preventDefault();
+        dragDepth++;
+        els.dropzone.classList.add('is-dragover');
+    });
+    els.dropzone.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+    });
+    els.dropzone.addEventListener('dragleave', () => {
+        if (--dragDepth <= 0) {
+            dragDepth = 0;
+            els.dropzone.classList.remove('is-dragover');
+        }
+    });
+    els.dropzone.addEventListener('drop', e => {
+        e.preventDefault();
+        dragDepth = 0;
+        els.dropzone.classList.remove('is-dragover');
+        ingestFiles(e.dataTransfer && e.dataTransfer.files);
+    });
+
+    // Verhindert, dass ein Fehlwurf neben der Zone die Datei im Browser öffnet
+    ['dragover', 'drop'].forEach(type => {
+        window.addEventListener(type, e => {
+            if (!els.dropzone.contains(e.target)) e.preventDefault();
+        });
     });
 
     // --- Foto aufnehmen (öffnet auf Mobilgeräten die Kamera-App, auch über HTTP) ---
@@ -247,6 +316,10 @@ Inbox gelegt und automatisch verarbeitet.</p>
 
         const fd = new FormData();
         pages.forEach(p => fd.append('files', p.blob, p.name));
+        fd.append('bundle_id', newBundleId());
+        fd.append('source', 'web-scan');
+        fd.append('complete', 'true');
+        if (els.title.value.trim()) fd.append('title', els.title.value.trim());
 
         try {
             const r = await fetch('/api/scan/upload', { method: 'POST', body: fd });
@@ -257,7 +330,8 @@ Inbox gelegt und automatisch verarbeitet.</p>
             const errMsg = (data.errors && data.errors.length)
                 ? ` Hinweise: ${data.errors.map(escapeHtml).join('; ')}` : '';
             setStatus('✅ ' + escapeHtml(data.message || 'Hochgeladen.') + errMsg, 'success');
-            showFlash(`${data.saved.length} Seite(n) zur Verarbeitung eingeplant.`);
+            showFlash(`${data.saved.length} Seite(n) werden zu einem PDF verarbeitet.`);
+            els.title.value = '';
             clearPages();
         } catch (e) {
             setStatus('❌ Fehler beim Hochladen: ' + escapeHtml(e.message), 'error');

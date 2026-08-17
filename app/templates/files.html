@@ -221,7 +221,10 @@ function toggleContext() {
 }
 
 async function initFilesPage() {
-    if (localStorage.getItem('filesContextCollapsed') === '1') {
+    // Auf schmalen Displays startet der Filterbereich eingeklappt, damit die
+    // Liste/Timeline sofort sichtbar ist.
+    const isNarrow = window.matchMedia('(max-width: 768px)').matches;
+    if (isNarrow || localStorage.getItem('filesContextCollapsed') === '1') {
         document.getElementById('files-layout').classList.add('context-collapsed');
     }
     TagSelect.init(document.getElementById('tag-select'), { onChange: reloadFiles });
@@ -391,7 +394,7 @@ function rowHtml(f) {
         <td><span class="status-badge status-${f.status}">${f.status}</span></td>
         <td><small>${importedDate}</small></td>
         <td>
-            <a href="/files/${f.id}" role="button" class="outline small" onclick="return openDetail(event, '${f.id}')">Details</a>
+            <a href="/files/${f.id}" role="button" class="outline small detail-link" onclick="return openDetail(event, '${f.id}')">Details</a>
             <button onclick="reprocessFile('${f.id}')" class="outline secondary small">↻</button>
             <button onclick="deleteFileRow('${f.id}')" class="outline contrast small">🗑</button>
         </td>

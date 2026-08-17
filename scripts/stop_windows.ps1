@@ -34,10 +34,46 @@ if (-not $procs) {
     Write-Host "JOLIA Docs gestoppt." -ForegroundColor Green
 }
 
-# Falls auf dem konfigurierten Port trotzdem noch etwas lauscht: Hinweis geben
-$stillListening = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-if ($stillListening) {
-    Write-Host "WARNUNG: Port $Port wird weiterhin von PID(s) $($stillListening.OwningProcess -join ', ') belegt." -ForegroundColor Red
+# ── Port freiräumen ───────────────────────────────────────────────────────────
+# Ein abgebrochener Start hinterlässt unter Windows gelegentlich einen
+# verwaisten multiprocessing-Kindprozess, der das Socket weiterhält. In der
+# Verbindungsliste steht dann noch die PID des längst beendeten Elternprozesses,
+# ein Kill dieser PID hilft also nicht – der Kindprozess muss gesucht werden.
+function Test-PortBusy {
+    return [bool](Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+}
+
+if (Test-PortBusy) {
+    Write-Host "Port $Port ist noch belegt – räume auf..." -ForegroundColor Yellow
+
+    Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique |
+        Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue } |
+        ForEach-Object {
+            Write-Host "  Beende PID $_ (belegt Port $Port)..." -ForegroundColor Yellow
+            taskkill /PID $_ /T /F | Out-Null
+        }
+
+    # Verwaiste multiprocessing-Kinder (Elternprozess existiert nicht mehr)
+    Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+        Where-Object {
+            $_.CommandLine -match 'multiprocessing' -and
+            -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue)
+        } |
+        ForEach-Object {
+            Write-Host "  Beende verwaisten Kindprozess PID $($_.ProcessId)..." -ForegroundColor Yellow
+            taskkill /PID $_.ProcessId /T /F | Out-Null
+        }
+
+    # Windows gibt das Socket nicht sofort frei
+    for ($i = 0; $i -lt 10 -and (Test-PortBusy); $i++) { Start-Sleep -Milliseconds 500 }
+}
+
+if (Test-PortBusy) {
+    $owners = (Get-NetTCPConnection -LocalPort $Port -State Listen).OwningProcess -join ', '
+    Write-Host "WARNUNG: Port $Port wird weiterhin von PID(s) $owners belegt." -ForegroundColor Red
+} else {
+    Write-Host "Port $Port ist frei." -ForegroundColor Green
 }
 
 if ($StopOllama) {

@@ -1,14 +1,14 @@
 import { useState, useCallback } from 'react';
 import { ScannedPage } from '../store/scanStore';
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../utils/errorMessages';
-import { uploadSession as apiUpload } from '../services/documentService';
+import { uploadSession as apiUpload, UploadOptions } from '../services/documentService';
 
 interface UseUploadResult {
   isUploading: boolean;
   progress: number;
   error: string | null;
   successMessage: string | null;
-  uploadSession: (guid: string, pages: ScannedPage[]) => Promise<boolean>;
+  uploadSession: (guid: string, pages: ScannedPage[], options?: UploadOptions) => Promise<boolean>;
   reset: () => void;
 }
 
@@ -18,14 +18,18 @@ export function useUpload(): UseUploadResult {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const uploadSession = useCallback(async (guid: string, pages: ScannedPage[]): Promise<boolean> => {
+  const uploadSession = useCallback(async (
+    guid: string,
+    pages: ScannedPage[],
+    options?: UploadOptions,
+  ): Promise<boolean> => {
     setIsUploading(true);
     setProgress(0);
     setError(null);
     setSuccessMessage(null);
 
     try {
-      await apiUpload(guid, pages, (n) => setProgress(n));
+      await apiUpload(guid, pages, (n) => setProgress(n), options);
       setSuccessMessage(SUCCESS_MESSAGES.UPLOAD_SUCCESS(guid, pages.length));
       setProgress(100);
       return true;

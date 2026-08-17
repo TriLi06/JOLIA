@@ -30,6 +30,18 @@ else
     sudo apt-get install -y ffmpeg
 fi
 
+# Tesseract prüfen (durchsuchbarer Textlayer in gescannten PDFs)
+if command -v tesseract >/dev/null 2>&1; then
+    echo "  Tesseract bereits installiert ($(tesseract --version 2>&1 | head -n1))."
+    if ! tesseract --list-langs 2>/dev/null | grep -qx "deu"; then
+        echo "  ⚠️  Deutsche Sprachdaten fehlen – installiere tesseract-ocr-deu..."
+        sudo apt-get install -y tesseract-ocr-deu
+    fi
+else
+    echo "  ⚠️  Tesseract nicht gefunden – versuche erneute Installation..."
+    sudo apt-get install -y tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng
+fi
+
 # Python Virtual Environment
 echo "Erstelle Python-Environment..."
 python3 -m venv .venv

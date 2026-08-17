@@ -13,7 +13,7 @@ interface Toast {
 
 export default function ReviewPage() {
   const navigate = useNavigate();
-  const { guid, pages, clearSession, removeLastPage } = useScanStore();
+  const { guid, pages, title, source, setTitle, clearSession, removeLastPage } = useScanStore();
   const { isUploading, progress, error: uploadError, successMessage, uploadSession } = useUpload();
 
   const [toast, setToast] = useState<Toast | null>(null);
@@ -47,7 +47,7 @@ export default function ReviewPage() {
 
   async function handleSave() {
     if (!guid || pages.length === 0) return;
-    await uploadSession(guid, pages);
+    await uploadSession(guid, pages, { title, source });
   }
 
   function handleCancel() {
@@ -65,12 +65,25 @@ export default function ReviewPage() {
       <div className="flex items-center justify-between border-b border-slate-700 bg-slate-800 px-4 py-3">
         <h1 className="text-base font-bold text-white">Erfasste Seiten</h1>
         <span className="rounded-full bg-blue-700 px-3 py-0.5 text-xs font-semibold text-white">
-          {pages.length} Seite{pages.length !== 1 ? 'n' : ''}
+          {pages.length} Seite{pages.length !== 1 ? 'n' : ''} → 1 PDF
         </span>
       </div>
 
       {/* Seiten-Raster */}
       <div className="flex-1 overflow-y-auto p-3">
+        <label className="mb-3 block">
+          <span className="mb-1 block text-xs font-medium text-slate-400">
+            Dokumenttitel (optional)
+          </span>
+          <input
+            type="text"
+            value={title}
+            maxLength={60}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="z. B. Rechnung Stadtwerke 2026"
+            className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+          />
+        </label>
         <div className="grid grid-cols-2 gap-3">
           {pages.map((page, i) => (
             <ReviewCard

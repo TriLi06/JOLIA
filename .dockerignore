@@ -2,6 +2,7 @@
 .venv
 venv
 data
+jolia
 docscan-pwa
 .git
 .gitignore

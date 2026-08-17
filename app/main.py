@@ -60,6 +60,22 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Wiederaufnahme unterbrochener Jobs fehlgeschlagen.")
 
+    # Liegengebliebene Scan-Bundle-Ordner aus abgebrochenen Läufen entfernen
+    try:
+        from app.services.scan_bundle_service import ensure_tesseract, purge_stale_workdirs
+        purge_stale_workdirs(cfg)
+        tesseract_path = ensure_tesseract()
+        if tesseract_path:
+            logger.info("Tesseract: %s", tesseract_path)
+        else:
+            logger.warning(
+                "Tesseract nicht gefunden – gescannte PDFs erhalten keinen markierbaren "
+                "Textlayer. Installation: winget install --id UB-Mannheim.TesseractOCR "
+                "bzw. apt-get install tesseract-ocr tesseract-ocr-deu."
+            )
+    except Exception:
+        logger.exception("Aufräumen alter Scan-Bundles fehlgeschlagen.")
+
     # Optional: Watchdog starten
     if cfg.watcher.enabled:
         from app.services.watcher_service import start_watcher

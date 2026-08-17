@@ -1,8 +1,12 @@
 # Standard-Konfiguration für den Docker-Betrieb.
 # Wird beim Image-Build nach /app/config.yaml kopiert.
-# Alle Pfade sind containerinterne Pfade; sie werden per docker-compose.yml
-# auf Verzeichnisse unter ~/jolia/ auf dem Host gemountet.
-# Normalerweise muss hier NICHTS angepasst werden.
+# Alle Pfade sind containerinterne Pfade; die Zuordnung zu Host-Ordnern bzw.
+# Docker-Volumes steht in der docker-compose.yml.
+#
+# Normalerweise muss hier NICHTS angepasst werden. Änderungen an dieser Datei
+# erfordern einen Neubau des Images (docker compose up -d --build).
+# Zum Abschalten einzelner Funktionen stattdessen die "Notfall-Schalter" in der
+# .env verwenden (siehe .env.example und README) – die wirken sofort.
 
 app:
   host: "0.0.0.0"
@@ -16,7 +20,7 @@ paths:
   archive_root: "/data/source_documents"
   data_dir: "/data/store"
   temp_dir: "/data/store/temp"
-  backup_target: "/data/store/backup"
+  backup_target: "/data/backup"
 
 models:
   embedding_model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
@@ -53,11 +57,23 @@ processing:
   duplicate_time_window_seconds: 120
 
 watcher:
-  # Automatischer Import aus der Inbox aktiviert -> einfach Dateien in
-  # ~/jolia/inbox legen, sie werden automatisch verarbeitet.
+  # Automatischer Import aus der Inbox aktiviert -> einfach Dateien in den
+  # gemounteten Inbox-Ordner legen, sie werden automatisch verarbeitet.
   enabled: true
   scan_interval_seconds: 60
   stability_threshold_seconds: 30
+
+scan:
+  bundle_enabled: true
+  bundle_idle_seconds: 45
+  bundle_max_pages: 100
+  pdf_ocr: true
+  pdf_dpi: 0
+  pdf_jpeg_quality: 85
+  vision_per_page: true
+  vision_max_pages: 0
+  keep_page_images_seconds: 0
+  default_title_prefix: "Scan"
 
 scheduled_jobs:
   clustering: { enabled: true, interval_seconds: 3600 }

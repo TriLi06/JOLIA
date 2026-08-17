@@ -57,8 +57,28 @@
     --border-radius: var(--pico-border-radius);
 }
 
+html {
+    /* Verhindert, dass mobile Browser die Schrift beim Drehen eigenmächtig skalieren */
+    -webkit-text-size-adjust: 100%;
+}
+
 body {
     background: var(--pico-background-color);
+    overflow-wrap: break-word;
+}
+
+/* Medien nie breiter als ihr Container – verhindert horizontales Scrollen */
+img,
+video,
+canvas,
+iframe {
+    max-width: 100%;
+}
+
+pre {
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 /* Inline-SVG-Icons (Feather-Stil, strichbasiert) */
@@ -195,11 +215,15 @@ body {
 /* ============================================================
    Dateien-Seite: Voll­breiten-Layout + Kontext-Sidebar
    ============================================================ */
+/* Der Container der Dateien-Seite wird selbst auf Vollbreite gesetzt, statt
+   per 100vw auszubrechen (100vw ignoriert die Scrollbar → horizontaler Überlauf). */
+main.container:has(> .files-fullbleed) {
+    max-width: none;
+    padding-inline: 0;
+}
 .files-fullbleed {
-    width: 100vw;
-    position: relative;
-    left: 50%;
-    margin-left: -50vw;
+    width: 100%;
+    max-width: 100%;
     padding: 0 1.5rem;
     box-sizing: border-box;
 }
@@ -406,11 +430,17 @@ body {
 @media (max-width: 900px) {
     .files-layout {
         flex-direction: column;
+        /* Ohne stretch würden Sidebar und Hauptbereich im Spalten-Flex
+           auf Inhaltsbreite schrumpfen statt die volle Breite zu nutzen. */
+        align-items: stretch;
+    }
+    .files-main {
+        width: 100%;
     }
     .context-sidebar {
         position: static;
         width: 100%;
-        flex-basis: auto;
+        flex: 0 0 auto;
         max-height: none;
     }
     .nav-primary a span,
@@ -542,7 +572,9 @@ nav .brand {
     width: 500px;
     max-width: 92vw;
     height: 100%;
+    height: 100dvh;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     background: var(--card-background-color, #fff);
     box-shadow: -4px 0 16px rgba(0,0,0,0.15);
     padding: 1rem;
@@ -663,7 +695,9 @@ nav .brand {
 .virtual-scroll {
     overflow: auto;
     max-height: calc(100vh - 320px);
+    max-height: calc(100dvh - 320px);
     min-height: 300px;
+    -webkit-overflow-scrolling: touch;
 }
 #files-table thead th {
     position: sticky;
@@ -755,6 +789,7 @@ nav .brand {
 .chat-messages {
     min-height: 300px;
     max-height: 60vh;
+    max-height: 60dvh;
     overflow-y: auto;
     padding: 1rem;
     border: 1px solid var(--table-border-color);
@@ -984,8 +1019,55 @@ footer {
 }
 
 /* Scan-Seite */
-.scan-actions {
+.scan-dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    text-align: center;
+    padding: 2rem 1rem;
     margin-bottom: 1rem;
+    border: 2px dashed var(--muted-border-color, var(--table-border-color));
+    border-radius: var(--border-radius);
+    background: var(--card-sectioning-background-color, var(--card-background-color));
+    cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s;
+}
+
+.scan-dropzone:hover,
+.scan-dropzone:focus-visible {
+    border-color: var(--primary);
+}
+
+.scan-dropzone.is-dragover {
+    border-color: var(--primary);
+    background: var(--primary-focus, var(--secondary-background));
+}
+
+.scan-dropzone.is-dragover * {
+    pointer-events: none;
+}
+
+.scan-dropzone-icon {
+    font-size: 2rem;
+    line-height: 1;
+}
+
+.scan-dropzone small {
+    color: var(--muted-color);
+}
+
+.scan-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.scan-actions button {
+    margin-bottom: 0;
+    width: auto;
 }
 
 .scan-hint {
@@ -1087,6 +1169,314 @@ footer {
     color: #fff;
     cursor: pointer;
     font-size: 0.85rem;
+}
+
+/* ============================================================
+   Responsive Layout – Tablets & Smartphones
+   ============================================================ */
+
+/* Tabellen mit vielen Spalten bekommen einen eigenen horizontalen
+   Scrollbereich, statt die Seite zu sprengen. */
+.table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Schlüssel/Wert-Tabelle der Detailansicht: lange Pfade/Hashes umbrechen */
+.detail-table td {
+    overflow-wrap: anywhere;
+}
+
+/* Tooltips gibt es nur mit echter Maus – auf Touch bleiben sie sonst kleben. */
+@media (hover: none) {
+    .thumb-tooltip {
+        display: none !important;
+    }
+}
+
+@media (max-width: 1024px) {
+    .files-fullbleed {
+        padding: 0 1rem;
+    }
+}
+
+/* Nur solange die Sidebar noch neben dem Inhalt steht (siehe 900px-Umbruch) */
+@media (min-width: 901px) and (max-width: 1024px) {
+    .context-sidebar {
+        flex: 0 0 210px;
+        width: 210px;
+    }
+}
+
+@media (max-width: 768px) {
+    /* ---------- Navigation: kompakt und fingerfreundlich ---------- */
+    .app-nav-inner {
+        gap: 0.35rem;
+        padding: 0.35rem 0.6rem;
+    }
+    .app-nav .brand {
+        font-size: 0.95rem;
+        margin-right: 0.1rem;
+    }
+    .nav-primary {
+        gap: 0;
+    }
+    .nav-primary a,
+    .nav-secondary a,
+    .nav-scan {
+        min-height: 44px;
+        justify-content: center;
+        padding-inline: 0.6rem;
+    }
+    .nav-right {
+        gap: 0.4rem;
+    }
+    .nav-secondary {
+        padding-left: 0.35rem;
+    }
+    .app-banner {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.8rem;
+    }
+
+    /* ---------- Grundlayout ---------- */
+    main.container {
+        padding-inline: 0.75rem;
+    }
+    h1 { font-size: 1.5rem; }
+    h2 { font-size: 1.25rem; }
+    h3 { font-size: 1.1rem; }
+
+    /* Schriftgröße 16px verhindert das automatische Hineinzoomen unter iOS */
+    input,
+    select,
+    textarea,
+    .filter-field input,
+    .filter-field select,
+    .tag-select-input {
+        font-size: 16px;
+    }
+
+    /* Breite Tabellen horizontal scrollen lassen (Dateiliste und
+       Detail-Schlüsseltabellen haben eigene Regeln). */
+    main table:not(#files-table):not(.detail-table) {
+        display: block;
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    /* Lieber umbrechen als scrollen: lange Pfade, Modellnamen, URLs …
+       (break-word statt anywhere, damit Tabellenspalten nicht auf
+       Ein-Buchstaben-Breite zusammenfallen) */
+    main table:not(#files-table) th {
+        white-space: normal;
+    }
+    main table:not(#files-table) td {
+        overflow-wrap: break-word;
+    }
+    code,
+    kbd {
+        overflow-wrap: anywhere;
+    }
+
+    /* ---------- Dateien-Seite ---------- */
+    .files-fullbleed {
+        padding: 0 0.75rem;
+    }
+    .files-header {
+        gap: 0.5rem;
+    }
+    .files-header h1 {
+        font-size: 1.15rem;
+    }
+    .files-header .files-header-spacer {
+        display: none;
+    }
+    .view-switch {
+        margin-left: auto;
+    }
+    .files-layout {
+        gap: 0.75rem;
+    }
+    .context-sidebar {
+        padding: 0.75rem;
+    }
+    .virtual-scroll {
+        max-height: calc(100vh - 240px);
+        max-height: calc(100dvh - 240px);
+        min-height: 240px;
+    }
+    /* Nebensächliche Spalten ausblenden: Typ, Tags, Größe, Importiert */
+    #files-table th:nth-child(2),
+    #files-table td:nth-child(2),
+    #files-table th:nth-child(3),
+    #files-table td:nth-child(3),
+    #files-table th:nth-child(4),
+    #files-table td:nth-child(4),
+    #files-table th:nth-child(6),
+    #files-table td:nth-child(6) {
+        display: none;
+    }
+    #files-table tbody td {
+        max-width: none;
+    }
+    /* Feste Spaltenbreiten: die Tabelle passt sich der Bildschirmbreite an,
+       der Dateiname bekommt den Rest und wird bei Bedarf gekürzt. */
+    #files-table {
+        table-layout: fixed;
+        width: 100%;
+    }
+    #files-table th:nth-child(5),
+    #files-table td:nth-child(5) {
+        width: 100px;
+    }
+    #files-table th:nth-child(7),
+    #files-table td:nth-child(7) {
+        width: 86px;
+    }
+    /* Der Dateiname öffnet die Detailansicht bereits – Extra-Button entfällt */
+    #files-table .detail-link {
+        display: none;
+    }
+    #files-table td button.small {
+        padding-inline: 0.4rem;
+    }
+
+    /* ---------- Timeline-Kacheln ---------- */
+    .thumb-grid {
+        grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+        gap: 3px;
+    }
+    .timeline-day-header,
+    .timeline-day-placeholder {
+        margin-left: 0.25rem;
+    }
+    .timeline-day-header {
+        font-size: 1rem;
+    }
+    .timeline-day-grid {
+        min-height: 100px;
+    }
+
+    /* ---------- Detail-Sidebar: Vollbild ---------- */
+    .file-sidebar {
+        /* !important überschreibt die per localStorage gemerkte Desktop-Breite */
+        width: 100% !important;
+        max-width: 100%;
+        padding: 0.75rem 0.75rem 2rem;
+    }
+    .file-sidebar-resize-handle {
+        display: none;
+    }
+    .file-detail-thumb {
+        max-height: 45vh;
+    }
+
+    /* ---------- Chat ---------- */
+    .chat-messages {
+        max-height: 55vh;
+        max-height: 55dvh;
+        padding: 0.75rem;
+    }
+    .chat-user .bubble,
+    .chat-assistant .bubble {
+        max-width: 92%;
+    }
+    /* Eingabefeld und Senden-Button nebeneinander lassen */
+    #chat-form .grid {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.5rem;
+        align-items: center;
+    }
+    #chat-form .grid > * {
+        margin-bottom: 0;
+    }
+
+    /* ---------- Scan-Seite ---------- */
+    .scan-camera video {
+        max-height: 50vh;
+        max-height: 50dvh;
+    }
+    .scan-camera-controls select,
+    .scan-camera-controls button {
+        flex: 1 1 140px;
+    }
+    .scan-pages-grid {
+        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    }
+    .scan-page-card img {
+        height: 110px;
+    }
+
+    /* ---------- Suche / Detailseite ---------- */
+    .search-thumb {
+        width: 64px;
+        height: 64px;
+    }
+    .filter-panel {
+        padding: 0.75rem;
+    }
+    .similar-chat-form {
+        flex-wrap: wrap;
+    }
+    .similar-chat-form input {
+        flex: 1 1 100%;
+    }
+}
+
+/* ---------- Sehr schmale Geräte (kleine Smartphones) ---------- */
+@media (max-width: 420px) {
+    .app-nav .brand span {
+        display: none;
+    }
+    .app-nav-inner {
+        gap: 0.2rem;
+        padding: 0.35rem 0.5rem;
+    }
+    .nav-primary a,
+    .nav-secondary a,
+    .nav-scan {
+        padding-inline: 0.45rem;
+    }
+    .files-header h1 {
+        font-size: 1.05rem;
+    }
+    .context-toggle,
+    .view-switch button {
+        padding: 0.4rem 0.5rem;
+        font-size: 0.8rem;
+    }
+    .thumb-grid {
+        grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    }
+    .scan-pages-grid {
+        grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    }
+    .scan-page-card img {
+        height: 96px;
+    }
+}
+
+/* ---------- Querformat mit wenig Höhe ---------- */
+@media (max-height: 500px) and (orientation: landscape) {
+    .app-nav {
+        position: static;
+    }
+    .chat-messages {
+        min-height: 140px;
+        max-height: 45dvh;
+    }
+    .scan-camera video {
+        max-height: 60dvh;
+    }
+    .virtual-scroll {
+        max-height: calc(100dvh - 170px);
+        min-height: 150px;
+    }
+    .context-sidebar {
+        top: 0.5rem;
+    }
 }
 
 .scan-page-remove:hover {

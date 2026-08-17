@@ -79,7 +79,8 @@ function closeDetail() {
     const handle = document.getElementById('file-sidebar-resize-handle');
     if (!sidebar || !handle) return;
     const savedWidth = localStorage.getItem('fileSidebarWidth');
-    if (savedWidth) sidebar.style.width = savedWidth + 'px';
+    // Auf Smartphones/Tablets ist die Sidebar per CSS immer bildschirmfüllend.
+    if (savedWidth && window.innerWidth > 768) sidebar.style.width = savedWidth + 'px';
 
     let dragging = false;
     let startX = 0;
@@ -97,7 +98,7 @@ function closeDetail() {
         if (!dragging) return;
         // Sidebar haengt rechts am Bildschirmrand, daher Breite = Startbreite minus Delta der Mausbewegung nach rechts
         const delta = evt.clientX - startX;
-        const minWidth = 320;
+        const minWidth = Math.min(320, window.innerWidth);
         const maxWidth = window.innerWidth * 0.95;
         const newWidth = Math.min(maxWidth, Math.max(minWidth, startWidth - delta));
         sidebar.style.width = newWidth + 'px';

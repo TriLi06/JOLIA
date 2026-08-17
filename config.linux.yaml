@@ -38,6 +38,18 @@ watcher:
   scan_interval_seconds: 60
   stability_threshold_seconds: 30
 
+scan:
+  bundle_enabled: true
+  bundle_idle_seconds: 45
+  bundle_max_pages: 100
+  pdf_ocr: true
+  pdf_dpi: 0
+  pdf_jpeg_quality: 85
+  vision_per_page: true
+  vision_max_pages: 0
+  keep_page_images_seconds: 0
+  default_title_prefix: "Scan"
+
 scheduled_jobs:
   clustering: { enabled: true, interval_seconds: 3600 }
   backup: { enabled: true, interval_seconds: 86400 }

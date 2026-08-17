@@ -60,6 +60,27 @@ watcher:
   # Verhindert, dass Dateien importiert werden, die noch kopiert werden.
   stability_threshold_seconds: 30
 
+# Mehrseitige Scans: Einzelbilder aus der Scan-App werden zu EINEM PDF mit
+# durchsuchbarem Textlayer zusammengefasst. Gilt fuer Live-Kamera, Kamera-App
+# und externe Apps, die Seiten nach der Konvention {bundle_id}_{NN}.jpg ablegen.
+scan:
+  bundle_enabled: true
+  # Ohne Manifest: Wartezeit nach der letzten Seite, bevor gebuendelt wird.
+  bundle_idle_seconds: 45
+  bundle_max_pages: 100
+  # Tesseract-Textlayer einbetten (Text im PDF markierbar). Benoetigt Tesseract.
+  pdf_ocr: true
+  # DPI fuer die PDF-Seitengroesse. 0 = automatisch aus der Bildgroesse (Seite ~ A4).
+  pdf_dpi: 0
+  pdf_jpeg_quality: 85
+  # Zusaetzliche Ollama-Vision-Analyse pro Seite (Bildinhalte, Handschrift).
+  vision_per_page: true
+  # 0 = alle Seiten analysieren (auf reiner CPU sehr langsam).
+  vision_max_pages: 0
+  # >0 = Seitenbilder nach der Verarbeitung noch N Sekunden im temp_dir aufheben.
+  keep_page_images_seconds: 0
+  default_title_prefix: "Scan"
+
 scheduled_jobs:
   clustering: { enabled: true, interval_seconds: 3600 }
   backup: { enabled: true, interval_seconds: 86400 }

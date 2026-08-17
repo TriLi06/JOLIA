@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import CameraView from '../components/CameraView';
 import ScanButton from '../components/ScanButton';
@@ -19,6 +20,7 @@ export default function ScanPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null!);
   const containerRef = useRef<HTMLDivElement>(null);
   const stopLoopRef = useRef<(() => void) | null>(null);
+  const captureInputRef = useRef<HTMLInputElement>(null);
 
   const [toast, setToast] = useState<Toast | null>(null);
   const [viewDimensions, setViewDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
@@ -114,6 +116,30 @@ export default function ScanPage() {
     }
   }, [detectedCorners, viewDimensions, addPage, navigate, isReady, cvLoaded, startDetectionLoop, videoRef, canvasRef]);
 
+  // Kamera-App des Geraets: liefert dieselben Seiten in denselben Stack wie die Live-Kamera.
+  const handleCaptureFiles = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(event.target.files ?? []);
+      event.target.value = '';
+      if (files.length === 0) return;
+      files.forEach((file) => addPage(file, 'pwa-capture'));
+      navigate('/scan/review');
+    },
+    [addPage, navigate],
+  );
+
+  const captureInput = (
+    <input
+      ref={captureInputRef}
+      type="file"
+      accept="image/*"
+      capture="environment"
+      multiple
+      hidden
+      onChange={handleCaptureFiles}
+    />
+  );
+
   // Kamera-Fehler anzeigen
   if (cameraError) {
     return (
@@ -121,9 +147,16 @@ export default function ScanPage() {
         <span className="mb-4 text-5xl">📷</span>
         <h2 className="mb-2 text-lg font-semibold text-red-400">Kamera nicht verfügbar</h2>
         <p className="mb-6 text-sm text-slate-400">{cameraError}</p>
+        {captureInput}
+        <button
+          onClick={() => captureInputRef.current?.click()}
+          className="mb-3 rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white"
+        >
+          📸 Kamera-App verwenden
+        </button>
         <button
           onClick={() => window.location.reload()}
-          className="rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white"
+          className="rounded-xl border border-slate-600 px-6 py-3 font-semibold text-slate-300"
         >
           Erneut versuchen
         </button>
@@ -185,7 +218,14 @@ export default function ScanPage() {
 
         <ScanButton onScan={handleScan} disabled={!isReady} />
 
-        <div className="w-20" />
+        {captureInput}
+        <button
+          onClick={() => captureInputRef.current?.click()}
+          className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-600"
+          title="Seiten mit der Kamera-App des Geräts aufnehmen"
+        >
+          📸 Kamera-App
+        </button>
       </div>
 
       {/* Toast-Benachrichtigung */}

@@ -85,11 +85,32 @@ def _get_processor_registry() -> dict:
 
 
 def scan_inbox(inbox_path: Path) -> list[Path]:
-    """Gibt alle importierbaren Dateien im Inbox zurück."""
+    """Gibt alle importierbaren Dateien im Inbox zurück.
+
+    Fertige Scan-Bundles werden vorher zu einem PDF zusammengefasst; noch offene
+    Scan-Seiten bleiben liegen, damit sie nicht als Einzelbilder importiert werden.
+    """
+    from app.config import get_config
+    from app.services import scan_bundle_service
+
     if not inbox_path.exists():
         logger.warning("Inbox-Ordner existiert nicht: %s", inbox_path)
         return []
+
+    cfg = get_config()
+    if cfg.scan.bundle_enabled:
+        try:
+            scan_bundle_service.finalize_ready_bundles(cfg)
+        except Exception:
+            logger.exception("Inbox-Scan: Bündeln der Scan-Seiten fehlgeschlagen.")
+
     files = [f for f in inbox_path.iterdir() if f.is_file() and not is_ignored(f)]
+    if cfg.scan.bundle_enabled:
+        pending = [f for f in files if scan_bundle_service.is_scan_page(f)]
+        if pending:
+            logger.debug("Inbox-Scan: %d Scan-Seite(n) warten noch auf ihr Bundle.", len(pending))
+            files = [f for f in files if f not in pending]
+
     logger.info("Inbox-Scan: %d Dateien gefunden in %s", len(files), inbox_path)
     return files
 

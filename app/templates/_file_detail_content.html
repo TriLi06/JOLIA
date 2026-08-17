@@ -24,7 +24,7 @@
     <div>
         <h1>{{ file.original_filename }}</h1>
 
-        <table>
+        <table class="detail-table">
             <tr><th>Typ</th><td>{{ file.content_type or '–' }} ({{ file.mime_type or '–' }})</td></tr>
             <tr><th>Status</th><td><span class="status-badge status-{{ file.status }}">{{ file.status }}</span></td></tr>
             <tr><th>Größe</th><td>{{ "%.1f"|format((file.file_size or 0)/1024) }} KB</td></tr>
@@ -126,7 +126,7 @@
     <p><small>Von der KI vorgeschlagene oder manuell hinzugefügte Schlagworte. Damit lassen sich Dateien gruppieren und wiederfinden.</small></p>
     <div id="tags-badges" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.5rem"></div>
     <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-        <input type="text" id="tag-new-input" list="tag-datalist" placeholder="Tag hinzufügen…" style="min-width:200px">
+        <input type="text" id="tag-new-input" list="tag-datalist" placeholder="Tag hinzufügen…" style="flex:1 1 180px;min-width:0">
         <datalist id="tag-datalist"></datalist>
         <button onclick="addTagFromInput('{{ file.id }}')" title="Tag hinzufügen">➕</button>
         <a href="#" id="find-by-tags-link" role="button" class="outline secondary" title="Ähnliche Dateien per Tags finden (Volltextsuche)">🔍 Per Tags finden</a>

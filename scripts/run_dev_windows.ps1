@@ -183,6 +183,63 @@ if ($reqHash -ne $lastHash) {
     Write-Host "Abhängigkeiten unverändert – überspringe Installation." -ForegroundColor Green
 }
 
+# ── Tesseract-OCR (durchsuchbarer Textlayer in gescannten PDFs) ────────────────
+# Wird bei JEDEM Start geprüft, da winget-Installationen den PATH erst in einer
+# neuen Shell setzen und Tesseract sonst still fehlt.
+Write-Host ""
+Write-Host "Prüfe Tesseract-OCR..." -ForegroundColor Cyan
+$tessDirs = @(
+    "$env:ProgramFiles\Tesseract-OCR",
+    "${env:ProgramFiles(x86)}\Tesseract-OCR",
+    "$env:LOCALAPPDATA\Programs\Tesseract-OCR"
+)
+
+function Resolve-Tesseract {
+    $cmd = Get-Command tesseract -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    foreach ($dir in $tessDirs) {
+        $exe = Join-Path $dir "tesseract.exe"
+        if (Test-Path $exe) {
+            $env:PATH = "$dir;$env:PATH"
+            return $exe
+        }
+    }
+    return $null
+}
+
+$tesseractExe = Resolve-Tesseract
+if (-not $tesseractExe) {
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "  Installiere Tesseract-OCR via winget..." -ForegroundColor Yellow
+        winget install --id UB-Mannheim.TesseractOCR --silent --accept-source-agreements --accept-package-agreements
+        $tesseractExe = Resolve-Tesseract
+    } else {
+        Write-Host "  ⚠️  winget nicht gefunden." -ForegroundColor Yellow
+    }
+}
+
+if ($tesseractExe) {
+    Write-Host "  Tesseract gefunden: $tesseractExe" -ForegroundColor Green
+    # Deutsche Sprachdaten nachziehen, falls der Installer nur Englisch gesetzt hat
+    $tessdata = Join-Path ([System.IO.Path]::GetDirectoryName($tesseractExe)) "tessdata"
+    $deuData = Join-Path $tessdata "deu.traineddata"
+    if ((Test-Path $tessdata) -and -not (Test-Path $deuData)) {
+        Write-Host "  Lade deutsche Sprachdaten (deu.traineddata)..." -ForegroundColor Yellow
+        try {
+            Invoke-WebRequest -UseBasicParsing -OutFile $deuData `
+                -Uri "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/deu.traineddata"
+            Write-Host "  Deutsche Sprachdaten installiert." -ForegroundColor Green
+        } catch {
+            Write-Host "  ⚠️  Download fehlgeschlagen (Schreibrechte/Netzwerk)." -ForegroundColor Yellow
+            Write-Host "     Ohne deu.traineddata in config.yaml setzen: processing.ocr_languages: `"eng`"" -ForegroundColor DarkGray
+        }
+    }
+} else {
+    Write-Host "  ⚠️  Tesseract nicht verfügbar – gescannte PDFs erhalten KEINEN markierbaren Textlayer." -ForegroundColor Yellow
+    Write-Host "     Die Inhalte bleiben über die JOLIA-Suche (KI-Bildanalyse) auffindbar." -ForegroundColor DarkGray
+    Write-Host "     Manuell: winget install --id UB-Mannheim.TesseractOCR" -ForegroundColor DarkGray
+}
+
 # config.yaml anlegen falls nicht vorhanden
 if (-Not (Test-Path "config.yaml")) {
     Copy-Item "config.example.yaml" "config.yaml"

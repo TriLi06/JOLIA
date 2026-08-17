@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional
 
 import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class AppConfig(BaseModel):
@@ -107,6 +110,28 @@ class WatcherConfig(BaseModel):
     stability_threshold_seconds: int = 30
 
 
+class ScanConfig(BaseModel):
+    """Mehrseitige Scans: Einzelbilder werden zu einem durchsuchbaren PDF gebündelt."""
+
+    # Bündelung aktiv? Bei false werden Scan-Seiten wie normale Einzelbilder importiert.
+    bundle_enabled: bool = True
+    # Ohne Manifest: Wartezeit nach der letzten empfangenen Seite, bevor gebündelt wird.
+    bundle_idle_seconds: int = 45
+    bundle_max_pages: int = 100
+    # Tesseract-Textlayer ins PDF einbetten (macht den Text markierbar/durchsuchbar).
+    pdf_ocr: bool = True
+    # DPI für die PDF-Seitengröße. 0 = automatisch aus der Bildgröße (Seite ≈ A4).
+    pdf_dpi: int = 0
+    pdf_jpeg_quality: int = 85
+    # Pro Seite zusätzlich eine Ollama-Vision-Analyse (Bildinhalte, Handschrift) ausführen.
+    vision_per_page: bool = True
+    # Deckel für die Vision-Analyse; 0 = alle Seiten (auf CPU sehr langsam).
+    vision_max_pages: int = 0
+    # >0: Seitenbilder nach der Verarbeitung noch N Sekunden im temp_dir aufheben (Debug).
+    keep_page_images_seconds: int = 0
+    default_title_prefix: str = "Scan"
+
+
 class ScheduledJobConfig(BaseModel):
     enabled: bool = True
     interval_seconds: int = 3600
@@ -126,10 +151,104 @@ class Config(BaseModel):
     models: ModelsConfig = ModelsConfig()
     processing: ProcessingConfig = ProcessingConfig()
     watcher: WatcherConfig = WatcherConfig()
+    scan: ScanConfig = ScanConfig()
     scheduled_jobs: ScheduledJobsConfig = ScheduledJobsConfig()
 
 
 _config: Optional[Config] = None
+
+
+# ---------------------------------------------------------------------------
+# Notfall-Schalter über Umgebungsvariablen
+#
+# Jede Variable überschreibt genau einen Wert aus der config.yaml. Damit lassen
+# sich einzelne Features abschalten oder Grenzwerte anpassen, ohne die
+# config.yaml zu ändern – im Docker-Betrieb also ohne Neubau des Images
+# (Variable in .env setzen, danach `docker compose up -d`).
+# Leere Werte gelten als "nicht gesetzt". Siehe README, Abschnitt
+# "Notfall-Schalter".
+# ---------------------------------------------------------------------------
+
+def _env_bool(raw: str) -> bool:
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError("erwartet true oder false")
+
+
+def _env_int(raw: str) -> int:
+    return int(raw.strip())
+
+
+def _env_float(raw: str) -> float:
+    return float(raw.strip())
+
+
+def _env_str(raw: str) -> str:
+    return raw.strip()
+
+
+_ENV_OVERRIDES: tuple[tuple[str, tuple[str, ...], Callable[[str], Any]], ...] = (
+    # --- Pfade -------------------------------------------------------------
+    ("INBOX_PATH", ("paths", "inbox"), _env_str),
+    ("ARCHIVE_ROOT", ("paths", "archive_root"), _env_str),
+    ("DATA_DIR", ("paths", "data_dir"), _env_str),
+    ("TEMP_DIR", ("paths", "temp_dir"), _env_str),
+    ("BACKUP_TARGET", ("paths", "backup_target"), _env_str),
+
+    # --- Modelle -----------------------------------------------------------
+    ("OLLAMA_BASE_URL", ("models", "ollama_base_url"), _env_str),
+    ("OLLAMA_MODEL", ("models", "ollama_model"), _env_str),
+    ("JOLIA_OLLAMA_TIMEOUT", ("models", "ollama_timeout"), _env_float),
+    # tiny | base | small | medium | large – kleiner = schneller auf der CPU
+    ("JOLIA_WHISPER_MODEL", ("models", "whisper_python_model"), _env_str),
+    # Mirror, falls huggingface.co nicht erreichbar ist (z.B. Firmennetz)
+    ("JOLIA_HF_ENDPOINT", ("models", "hf_endpoint"), _env_str),
+
+    # --- Feature-Schalter --------------------------------------------------
+    ("JOLIA_ENABLE_OCR", ("processing", "enable_ocr"), _env_bool),
+    ("JOLIA_ENABLE_IMAGE_OCR", ("processing", "enable_image_ocr"), _env_bool),
+    ("JOLIA_ENABLE_AUDIO_TRANSCRIPTION", ("processing", "enable_audio_transcription"), _env_bool),
+    ("JOLIA_ENABLE_VIDEO_TRANSCRIPTION", ("processing", "enable_video_transcription"), _env_bool),
+    ("JOLIA_ENABLE_MEDIA_SUMMARIZATION", ("processing", "enable_media_summarization"), _env_bool),
+    ("JOLIA_ENABLE_TAG_SUGGESTION", ("processing", "enable_tag_suggestion"), _env_bool),
+    ("JOLIA_ENABLE_CLIP_EMBEDDINGS", ("processing", "enable_clip_embeddings"), _env_bool),
+    ("JOLIA_ENABLE_CLAP_EMBEDDINGS", ("processing", "enable_clap_embeddings"), _env_bool),
+    ("JOLIA_ENABLE_FACE_DETECTION", ("processing", "enable_face_detection"), _env_bool),
+
+    # --- Leistung / Grenzwerte ---------------------------------------------
+    ("JOLIA_MAX_CONCURRENT_PROCESSING", ("processing", "max_concurrent_processing"), _env_int),
+    ("JOLIA_MAX_FILE_SIZE_MB", ("processing", "max_file_size_mb"), _env_int),
+    ("JOLIA_TRANSCRIPTION_SAMPLE_SECONDS", ("processing", "transcription_sample_seconds"), _env_int),
+    ("JOLIA_OCR_LANGUAGES", ("processing", "ocr_languages"), _env_str),
+
+    # --- Automatischer Import ----------------------------------------------
+    ("JOLIA_WATCHER_ENABLED", ("watcher", "enabled"), _env_bool),
+    ("JOLIA_WATCHER_INTERVAL_SECONDS", ("watcher", "scan_interval_seconds"), _env_int),
+
+    # --- Mehrseitige Scans -------------------------------------------------
+    ("JOLIA_SCAN_BUNDLE_ENABLED", ("scan", "bundle_enabled"), _env_bool),
+    ("JOLIA_SCAN_BUNDLE_IDLE_SECONDS", ("scan", "bundle_idle_seconds"), _env_int),
+    ("JOLIA_SCAN_PDF_OCR", ("scan", "pdf_ocr"), _env_bool),
+    ("JOLIA_SCAN_VISION_PER_PAGE", ("scan", "vision_per_page"), _env_bool),
+    ("JOLIA_SCAN_VISION_MAX_PAGES", ("scan", "vision_max_pages"), _env_int),
+
+    # --- Geplante Hintergrundjobs ------------------------------------------
+    ("JOLIA_CLUSTERING_ENABLED", ("scheduled_jobs", "clustering", "enabled"), _env_bool),
+    ("JOLIA_BACKUP_ENABLED", ("scheduled_jobs", "backup", "enabled"), _env_bool),
+    ("JOLIA_BACKUP_INTERVAL_SECONDS", ("scheduled_jobs", "backup", "interval_seconds"), _env_int),
+
+    # --- Zugriffsschutz ----------------------------------------------------
+    ("JOLIA_AUTH_ENABLED", ("app", "auth_enabled"), _env_bool),
+    ("JOLIA_AUTH_USERNAME", ("app", "auth_username"), _env_str),
+    ("JOLIA_AUTH_PASSWORD_HASH", ("app", "auth_password_hash"), _env_str),
+    ("JOLIA_AUTH_SESSION_SECRET", ("app", "auth_session_secret"), _env_str),
+
+    # --- Diagnose ----------------------------------------------------------
+    ("DEBUG", ("app", "debug"), _env_bool),
+)
 
 
 def load_config(config_path: Path = Path("config.yaml")) -> Config:
@@ -159,23 +278,28 @@ def load_config(config_path: Path = Path("config.yaml")) -> Config:
 
 
 def _apply_env_overrides(data: dict) -> None:
-    env_map = {
-        ("paths", "inbox"): "INBOX_PATH",
-        ("paths", "archive_root"): "ARCHIVE_ROOT",
-        ("paths", "data_dir"): "DATA_DIR",
-        ("paths", "temp_dir"): "TEMP_DIR",
-        ("paths", "backup_target"): "BACKUP_TARGET",
-        ("models", "ollama_base_url"): "OLLAMA_BASE_URL",
-        ("models", "ollama_model"): "OLLAMA_MODEL",
-    }
-    for (section, key), env_var in env_map.items():
-        value = os.getenv(env_var)
-        if value:
-            data.setdefault(section, {})[key] = value
+    """Wendet die in _ENV_OVERRIDES definierten Umgebungsvariablen an."""
+    for env_var, keys, parse in _ENV_OVERRIDES:
+        raw = os.getenv(env_var)
+        if raw is None or not raw.strip():
+            continue
+        try:
+            value = parse(raw)
+        except ValueError as exc:
+            # Nicht abbrechen: ein Tippfehler in .env darf den Start nicht verhindern.
+            logger.warning(
+                "Umgebungsvariable %s=%r wird ignoriert (%s).", env_var, raw, exc
+            )
+            continue
 
-    debug_val = os.getenv("DEBUG")
-    if debug_val is not None:
-        data.setdefault("app", {})["debug"] = debug_val.lower() == "true"
+        section = data
+        for key in keys[:-1]:
+            child = section.get(key)
+            if not isinstance(child, dict):
+                child = {}
+                section[key] = child
+            section = child
+        section[keys[-1]] = value
 
 
 def get_config() -> Config:

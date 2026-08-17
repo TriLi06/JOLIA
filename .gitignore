@@ -52,3 +52,6 @@ docscan-pwa/dist/
 # ChromaDB local data
 chroma_data/
 chromadb/
+
+# Docker-Standarddatenordner (Inbox / Archiv / Backup)
+jolia/

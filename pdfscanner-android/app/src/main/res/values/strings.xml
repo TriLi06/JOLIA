@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">PageScan</string>
+    <string name="scan">Scannen</string>
+    <string name="next_page">Weitere Seite</string>
+    <string name="finish">Abschließen</string>
+    <string name="discard">Verwerfen</string>
+    <string name="camera_permission_rationale">Für den Scanner wird Zugriff auf die Kamera benötigt.</string>
+    <string name="grant_permission">Kamera freigeben</string>
+</resources>

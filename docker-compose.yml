@@ -1,18 +1,35 @@
 # JOLIA Docs – komplettes Setup mit einem Befehl:
 #
-#     docker compose up -d
+#     docker compose up -d --build
 #
 # Danach im Browser öffnen:  http://localhost:8080
-# Dateien zum Verarbeiten in  ~/jolia/inbox  legen.
+# Dateien zum Verarbeiten in den Ordner "jolia/inbox" neben dieser Datei legen.
 #
 # Es ist KEINE manuelle Konfiguration nötig. Beim ersten Start werden
 # automatisch das Ollama-LLM (qwen2.5:3b) und das Embedding-Modell geladen
 # (einmaliger Download, danach lokal gecacht).
+#
+# Optional: eigene Ordner verwenden (Windows- und Linux-Pfade sind erlaubt).
+# Dazu eine Datei ".env" neben dieser docker-compose.yml anlegen, z. B.:
+#     JOLIA_INBOX=C:\Users\Max\Documents\JOLIA-Inbox
+#     JOLIA_ARCHIVE=D:\JOLIA\source_documents
+#     JOLIA_BACKUP=E:\JOLIA-Backup
+#     JOLIA_PORT=8080
+#
+# In derselben .env lassen sich auch die "Notfall-Schalter" setzen, mit denen
+# einzelne Funktionen abgeschaltet werden koennen, falls etwas klemmt
+# (siehe environment-Block des app-Dienstes weiter unten sowie README).
+# Vorlage: .env.example
+
+# Fester Projektname -> vorhersagbare Container- und Volume-Namen,
+# unabhaengig vom Ordnernamen.
+name: jolia-docs
 
 services:
   # Lokaler LLM-Server (RAG-Chat, Zusammenfassungen)
   ollama:
     image: ollama/ollama:latest
+    container_name: jolia-ollama
     volumes:
       - ollama-models:/root/.ollama
     healthcheck:
@@ -25,6 +42,7 @@ services:
   # Einmaliger Job: lädt das Standard-LLM, bevor die App startet
   ollama-init:
     image: ollama/ollama:latest
+    container_name: jolia-ollama-init
     depends_on:
       ollama:
         condition: service_healthy
@@ -36,19 +54,65 @@ services:
   # Die eigentliche JOLIA Docs-Anwendung
   app:
     build: .
+    image: jolia-docs:latest
+    container_name: jolia-app
     depends_on:
       ollama-init:
         condition: service_completed_successfully
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
+      # --- Notfall-Schalter -------------------------------------------------
+      # Alle folgenden Werte sind optional und normalerweise LEER. Sie werden
+      # nur gebraucht, wenn etwas nicht funktioniert oder zu langsam ist.
+      # Dazu den passenden Eintrag in die Datei ".env" schreiben (z. B.
+      # "JOLIA_ENABLE_FACE_DETECTION=false") und "docker compose up -d"
+      # ausfuehren – ein Neubau des Images ist NICHT noetig.
+      # Erklaerung aller Schalter: README, Abschnitt "Notfall-Schalter".
+      - JOLIA_ENABLE_OCR=${JOLIA_ENABLE_OCR:-}
+      - JOLIA_ENABLE_IMAGE_OCR=${JOLIA_ENABLE_IMAGE_OCR:-}
+      - JOLIA_ENABLE_AUDIO_TRANSCRIPTION=${JOLIA_ENABLE_AUDIO_TRANSCRIPTION:-}
+      - JOLIA_ENABLE_VIDEO_TRANSCRIPTION=${JOLIA_ENABLE_VIDEO_TRANSCRIPTION:-}
+      - JOLIA_ENABLE_MEDIA_SUMMARIZATION=${JOLIA_ENABLE_MEDIA_SUMMARIZATION:-}
+      - JOLIA_ENABLE_TAG_SUGGESTION=${JOLIA_ENABLE_TAG_SUGGESTION:-}
+      - JOLIA_ENABLE_CLIP_EMBEDDINGS=${JOLIA_ENABLE_CLIP_EMBEDDINGS:-}
+      - JOLIA_ENABLE_CLAP_EMBEDDINGS=${JOLIA_ENABLE_CLAP_EMBEDDINGS:-}
+      - JOLIA_ENABLE_FACE_DETECTION=${JOLIA_ENABLE_FACE_DETECTION:-}
+      - JOLIA_MAX_CONCURRENT_PROCESSING=${JOLIA_MAX_CONCURRENT_PROCESSING:-}
+      - JOLIA_MAX_FILE_SIZE_MB=${JOLIA_MAX_FILE_SIZE_MB:-}
+      - JOLIA_TRANSCRIPTION_SAMPLE_SECONDS=${JOLIA_TRANSCRIPTION_SAMPLE_SECONDS:-}
+      - JOLIA_OCR_LANGUAGES=${JOLIA_OCR_LANGUAGES:-}
+      - JOLIA_WHISPER_MODEL=${JOLIA_WHISPER_MODEL:-}
+      - JOLIA_HF_ENDPOINT=${JOLIA_HF_ENDPOINT:-}
+      - JOLIA_OLLAMA_TIMEOUT=${JOLIA_OLLAMA_TIMEOUT:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-}
+      - JOLIA_WATCHER_ENABLED=${JOLIA_WATCHER_ENABLED:-}
+      - JOLIA_WATCHER_INTERVAL_SECONDS=${JOLIA_WATCHER_INTERVAL_SECONDS:-}
+      - JOLIA_CLUSTERING_ENABLED=${JOLIA_CLUSTERING_ENABLED:-}
+      - JOLIA_BACKUP_ENABLED=${JOLIA_BACKUP_ENABLED:-}
+      - JOLIA_BACKUP_INTERVAL_SECONDS=${JOLIA_BACKUP_INTERVAL_SECONDS:-}
+      - JOLIA_AUTH_ENABLED=${JOLIA_AUTH_ENABLED:-}
+      - JOLIA_AUTH_USERNAME=${JOLIA_AUTH_USERNAME:-}
+      - JOLIA_AUTH_PASSWORD_HASH=${JOLIA_AUTH_PASSWORD_HASH:-}
+      - JOLIA_AUTH_SESSION_SECRET=${JOLIA_AUTH_SESSION_SECRET:-}
+      - DEBUG=${DEBUG:-}
     ports:
-      - "8080:8080"
+      - "${JOLIA_PORT:-8080}:8080"
     volumes:
-      # Host-Verzeichnisse (werden bei Bedarf automatisch angelegt)
-      - ${HOME}/jolia/inbox:/data/inbox
-      - ${HOME}/jolia/source_documents:/data/source_documents
-      - ${HOME}/jolia/data:/data/store
+      # Host-Verzeichnisse (werden bei Bedarf automatisch angelegt).
+      # Relative Pfade beziehen sich auf den Ordner dieser docker-compose.yml.
+      - ${JOLIA_INBOX:-./jolia/inbox}:/data/inbox
+      - ${JOLIA_ARCHIVE:-./jolia/source_documents}:/data/source_documents
+      - ${JOLIA_BACKUP:-./jolia/backup}:/data/backup
+      # Index (SQLite + ChromaDB) und Modell-Caches bewusst in einem Docker-Volume:
+      # Auf Windows/macOS sind Bind-Mounts für SQLite langsam und können zu
+      # "database is locked" führen. Der Index ist jederzeit per "Reindex"
+      # aus source_documents wiederherstellbar.
+      - jolia-store:/data/store
+      # Heruntergeladene KI-Modelle (Embedding, Whisper, CLAP)
+      - jolia-cache:/cache
     restart: unless-stopped
 
 volumes:
   ollama-models:
+  jolia-store:
+  jolia-cache:

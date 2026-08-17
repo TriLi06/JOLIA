@@ -10,10 +10,13 @@ export interface ScannedPage {
 export interface ScanSession {
   guid: string | null;
   pages: ScannedPage[];
+  title: string;
+  source: string;
 }
 
 interface ScanStore extends ScanSession {
-  addPage: (blob: Blob) => void;
+  addPage: (blob: Blob, source?: string) => void;
+  setTitle: (title: string) => void;
   clearSession: () => void;
   removeLastPage: () => void;
 }
@@ -21,8 +24,10 @@ interface ScanStore extends ScanSession {
 export const useScanStore = create<ScanStore>((set, get) => ({
   guid: null,
   pages: [],
+  title: '',
+  source: 'pwa-live',
 
-  addPage: (blob: Blob) => {
+  addPage: (blob: Blob, source?: string) => {
     const { guid, pages } = get();
     const newGuid = guid ?? generateGuid();
     const previewUrl = URL.createObjectURL(blob);
@@ -31,13 +36,19 @@ export const useScanStore = create<ScanStore>((set, get) => ({
       blob,
       previewUrl,
     };
-    set({ guid: newGuid, pages: [...pages, newPage] });
+    set({
+      guid: newGuid,
+      pages: [...pages, newPage],
+      ...(source && pages.length === 0 ? { source } : {}),
+    });
   },
+
+  setTitle: (title: string) => set({ title }),
 
   clearSession: () => {
     const { pages } = get();
     pages.forEach((p) => URL.revokeObjectURL(p.previewUrl));
-    set({ guid: null, pages: [] });
+    set({ guid: null, pages: [], title: '', source: 'pwa-live' });
   },
 
   removeLastPage: () => {
