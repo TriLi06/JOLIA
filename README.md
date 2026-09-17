@@ -28,6 +28,105 @@
 
 ---
 
+## Schnellstart Windows 11: automatische Installation via WSL2
+
+Die empfohlene Installationsmöglichkeit unter Windows 11 ist das automatische
+`WSL_startup.ps1`-Script. Es richtet eine eigene, isolierte WSL2-Distro
+`jolia-wsl` ein, installiert darin Docker Engine (ohne Docker Desktop), lädt
+JOLIA und startet die Anwendung. Danach wird JOLIA bei jeder Windows-Anmeldung
+automatisch gestartet.
+
+### Installation aus der Windows-Eingabeaufforderung (`cmd.exe`)
+
+1. Stelle sicher, dass **Git für Windows** installiert ist
+  (<https://git-scm.com/download/win>).
+2. Öffne eine normale **Windows-Eingabeaufforderung**: Start-Menü öffnen,
+  `cmd` eingeben und Enter drücken. Administratorrechte sind nicht nötig;
+  das Script fordert sie bei Bedarf selbst an.
+3. Füge den folgenden gesamten Block in `cmd.exe` ein und drücke Enter:
+
+```bat
+git clone https://github.com/TriLi06/JOLIA.git "%USERPROFILE%\JOLIA"
+cd /d "%USERPROFILE%\JOLIA"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\WSL_startup.ps1"
+```
+
+Der erste Start kann je nach Internetverbindung und Rechner mehrere Minuten
+dauern, da WSL2, Docker, die JOLIA-Abhängigkeiten und die KI-Modelle geladen
+werden. Wenn das Script meldet, dass die Windows-Features für WSL2 aktiviert
+wurden, starte den Rechner neu. Öffne danach wieder `cmd.exe`, führe die beiden
+letzten Zeilen des Blocks erneut aus und warte, bis `=== Fertig ===` angezeigt
+wird.
+
+Anschließend ist JOLIA unter <http://localhost:8080> erreichbar. Die Anwendung
+läuft vollständig lokal; die Internetverbindung wird nur für die einmaligen
+Downloads benötigt.
+
+### Alternative: Testinstallation ohne Windows-Administratorrechte
+
+Wenn WSL2 auf dem Rechner bereits installiert und einsatzbereit ist, kann
+JOLIA auch ohne Windows-Administratorrechte in einer separaten Test-Distro
+installiert werden. Diese Variante aktiviert keine Windows-Features, verwendet
+den benutzerbezogenen Ordner `%LOCALAPPDATA%\JOLIA-WSL-test` und legt keinen
+Windows-Autostart an. Die produktive Distro `jolia-wsl` bleibt davon getrennt.
+
+Öffne `cmd.exe`, wechsle in den lokalen Repository-Ordner und führe das
+Testinstallationsscript aus:
+
+```bat
+cd /d "%USERPROFILE%\JOLIA"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\WSL_test_install.ps1"
+```
+
+Nach der Installation ist JOLIA unter <http://localhost:8080> erreichbar. Nach
+einem Neustart von Windows gibt es keinen automatischen Start. Bei Bedarf kann
+JOLIA manuell gestartet werden:
+
+```bat
+wsl -d jolia-wsl-test -u root -- bash -c "service docker start && cd /opt/jolia && docker compose up -d"
+```
+
+Die Testinstallation einschließlich aller Docker-Daten kann ohne
+Administratorrechte entfernt werden. Führe dazu in `cmd.exe` aus:
+
+```bat
+wsl --unregister jolia-wsl-test
+rmdir /s /q "%LOCALAPPDATA%\JOLIA-WSL-test"
+```
+
+### JOLIA rückstandsfrei deinstallieren
+
+Die Deinstallation entfernt die isolierte WSL-Distro `jolia-wsl` einschließlich
+aller darin gespeicherten Docker-Container, Images, Volumes und JOLIA-Daten.
+Außerdem werden der Windows-Autostart-Task und der Ordner `C:\JOLIA-WSL`
+entfernt. Die allgemeinen Windows-Features für WSL2 und die
+Virtual Machine Platform bleiben aktiviert, weil sie auch von anderen WSL-
+Distributionen verwendet werden können.
+
+Öffne wieder eine normale **Windows-Eingabeaufforderung** (`cmd.exe`) und führe
+folgenden Befehl aus. Das Script fordert die nötigen Administratorrechte selbst
+über die UAC-Abfrage an:
+
+```bat
+cd /d "%USERPROFILE%\JOLIA"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\WSL_uninstall.ps1"
+```
+
+Warte, bis `=== Fertig ===` angezeigt wird. Der lokale Klon, aus dem das
+Installationsscript gestartet wurde, liegt danach noch unter
+`%USERPROFILE%\JOLIA`. Wenn auch dieser Ordner entfernt werden soll, führe
+anschließend aus:
+
+```bat
+cd /d "%USERPROFILE%"
+rmdir /s /q "%USERPROFILE%\JOLIA"
+```
+
+Damit sind JOLIA, die zugehörige WSL-Distro, Docker-Daten, der Autostart und
+der lokale Installationsklon entfernt.
+
+---
+
 ## Schnellstart (Windows Entwicklung)
 
 ```powershell
@@ -58,34 +157,6 @@ Projektordner) ablegen. Docker installieren, falls nicht vorhanden:
 `curl -fsSL https://get.docker.com | sh`
 
 Für Windows 11 gibt es die ausführliche Anleitung im nächsten Abschnitt.
-
----
-
-## Schnellstart Windows 11 via WSL2 (ein Skript, ohne Docker Desktop)
-
-Für eine komplett automatische Installation auf einem neuen Windows-11-Rechner,
-die sich auch wieder rückstandsfrei entfernen lässt:
-
-```powershell
-.\scripts\WSL_startup.ps1
-```
-
-Das Skript legt eine eigene, isolierte WSL2-Distro `jolia-wsl` an, installiert
-darin Docker Engine (kein Docker Desktop), klont JOLIA und startet es per
-`docker compose`. Anschließend startet JOLIA bei jedem Windows-Login
-automatisch neu. Falls WSL2 auf dem Rechner noch nicht aktiviert war, bricht
-das Skript einmalig mit dem Hinweis ab, den Rechner neu zu starten und es
-danach erneut auszuführen.
-
-Rückstandsfreie Deinstallation (entfernt Distro, Docker-Daten, Autostart-Task
-und Installationsordner vollständig):
-
-```powershell
-.\scripts\WSL_uninstall.ps1
-```
-
-Für Docker Desktop unter Windows 11 gibt es die ausführliche Anleitung im
-nächsten Abschnitt.
 
 ---
 
