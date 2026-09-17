@@ -61,6 +61,34 @@ Für Windows 11 gibt es die ausführliche Anleitung im nächsten Abschnitt.
 
 ---
 
+## Schnellstart Windows 11 via WSL2 (ein Skript, ohne Docker Desktop)
+
+Für eine komplett automatische Installation auf einem neuen Windows-11-Rechner,
+die sich auch wieder rückstandsfrei entfernen lässt:
+
+```powershell
+.\scripts\WSL_startup.ps1
+```
+
+Das Skript legt eine eigene, isolierte WSL2-Distro `jolia-wsl` an, installiert
+darin Docker Engine (kein Docker Desktop), klont JOLIA und startet es per
+`docker compose`. Anschließend startet JOLIA bei jedem Windows-Login
+automatisch neu. Falls WSL2 auf dem Rechner noch nicht aktiviert war, bricht
+das Skript einmalig mit dem Hinweis ab, den Rechner neu zu starten und es
+danach erneut auszuführen.
+
+Rückstandsfreie Deinstallation (entfernt Distro, Docker-Daten, Autostart-Task
+und Installationsordner vollständig):
+
+```powershell
+.\scripts\WSL_uninstall.ps1
+```
+
+Für Docker Desktop unter Windows 11 gibt es die ausführliche Anleitung im
+nächsten Abschnitt.
+
+---
+
 # 🐳 Docker Desktop unter Windows 11 – Schritt-für-Schritt-Anleitung
 
 Diese Anleitung ist für Einsteiger gedacht und setzt **keine** Docker-Kenntnisse

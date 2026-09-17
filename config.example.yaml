@@ -19,11 +19,22 @@ paths:
   backup_target: "/mnt/external_backup/jolia_backup"
 
 models:
-  embedding_model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-  embedding_backend: "sentence-transformers"  # "sentence-transformers" | "ollama"
+  embedding_model: "bge-m3"
+  embedding_backend: "ollama"  # "sentence-transformers" | "ollama"
+  embedding_ollama_model: "bge-m3"
   embedding_device: "auto"                    # "auto" | "cpu" | "cuda" | "mps"
   ollama_base_url: "http://localhost:11434"
   ollama_model: "qwen2.5:3b"
+  background_ollama_model: "qwen2.5:7b"
+  categorization_ollama_model: "qwen2.5:7b"
+  # Wie lange Ollama Modelle nach der letzten Anfrage im (V)RAM hält, bevor sie
+  # automatisch entladen werden (Ollama-Format: "10m", "1h", "0" = sofort entladen).
+  # Modelle werden dadurch NICHT beim Start von JOLIA geladen, sondern erst bei
+  # der ersten Chat-/Import-Anfrage - und nach Leerlauf wieder freigegeben.
+  ollama_keep_alive: "10m"
+  # Leerlaufzeit (Minuten) bis lokal im JOLIA-Prozess geladene Modelle
+  # (SentenceTransformer/OpenCLIP/CLAP) wieder entladen werden.
+  model_idle_unload_minutes: 10.0
   whisper_cpp_binary: ""
   whisper_model_path: ""
   ffmpeg_binary: "ffmpeg"

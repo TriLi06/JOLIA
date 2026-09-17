@@ -10,11 +10,36 @@
     </ul>
 </nav>
 
-<h1>✏️ OCR-Review</h1>
+<h1>✏️ Review</h1>
+
+<article>
+    <h3>Warum ist diese Datei hier?</h3>
+    <ul>
+        {% if file.status == 'needs_review' %}<li>Die OCR-Konfidenz ist zu niedrig.</li>{% endif %}
+        {% if file.category_needs_review %}<li>{{ file.category_review_reason or 'Die KI konnte keine sichere Kategorie bestimmen.' }}</li>{% endif %}
+    </ul>
+    {% if file.category_ai_response %}
+    <details>
+        <summary><strong>🤖 KI-Antwort zur Kategorisierung</strong></summary>
+        <pre style="white-space:pre-wrap;font-size:.85rem">{{ file.category_ai_response }}</pre>
+    </details>
+    {% endif %}
+</article>
 
 <div class="grid">
     <!-- Datei-Infos & Bild-Vorschau -->
     <div>
+        <article>
+            <header><strong>🗂️ Kategorie festlegen</strong></header>
+            <p><small>Eine manuelle Auswahl bestätigt die Kategorie und entfernt den Kategorie-Review.</small></p>
+            <select id="review-category-select" onchange="setReviewCategory('{{ file.id }}')">
+                <option value="">Kategorie wählen…</option>
+                {% for category in categories %}
+                <option value="{{ category.id }}" {% if category.id == file.category_id %}selected{% endif %}>{{ category.path }}</option>
+                {% endfor %}
+            </select>
+            <div id="category-result" style="margin-top:.5rem"></div>
+        </article>
         <article>
             <header><strong>{{ file.original_filename }}</strong></header>
             <table>
@@ -148,6 +173,25 @@ async function markAsProcessed(fileId) {
         }
     } catch (e) {
         result.innerHTML = `<p class="error">❌ Netzwerkfehler: ${e.message}</p>`;
+    }
+}
+
+async function setReviewCategory(fileId) {
+    const select = document.getElementById('review-category-select');
+    const result = document.getElementById('category-result');
+    if (!select.value) return;
+    try {
+        const r = await fetch(`/api/files/${fileId}/category`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category_id: select.value })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler');
+        result.innerHTML = '<p class="success">✅ Kategorie gespeichert. Weiterleitung…</p>';
+        setTimeout(() => { window.location.href = '/review'; }, 1200);
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ Fehler: ${e.message}</p>`;
     }
 }
 </script>

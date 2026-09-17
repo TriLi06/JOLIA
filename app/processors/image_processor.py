@@ -48,7 +48,8 @@ class ImageProcessor(BaseProcessor):
             else:
                 ocr_text, ocr_confidence = self._run_ocr(img, config.processing.ocr_languages)
 
-        needs_review = ocr_confidence < config.processing.ocr_confidence_threshold
+        # Ein Foto ohne erkannten Text ist kein OCR-Fehler und braucht daher keine Review.
+        needs_review = bool(ocr_text.strip()) and ocr_confidence < config.processing.ocr_confidence_threshold
 
         # --- Metadaten aufbauen ---
         metadata: dict = {

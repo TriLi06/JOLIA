@@ -343,7 +343,7 @@ def _build_pdf_with_textlayer(
                 img,
                 lang=cfg.processing.ocr_languages,
                 extension="pdf",
-                config=f"--dpi {_effective_dpi(img, cfg)}",
+                config=f"--dpi {_effective_dpi(img, cfg)} --oem 1 --psm 3",
             )
         finally:
             img.close()

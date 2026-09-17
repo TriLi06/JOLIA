@@ -94,6 +94,8 @@ async def lifespan(app: FastAPI):
         stop_watcher()
     from app.services.scheduler_service import stop_scheduler
     stop_scheduler()
+    from app.services import model_lifecycle
+    model_lifecycle.unload_all()
     logger.info("JOLIA Docs wird beendet.")
 
 
@@ -167,6 +169,8 @@ def create_app() -> FastAPI:
     from app.api.auth import router as auth_router
     from app.api.routes_scan import router as scan_router
     from app.api.routes_tags import router as tags_router
+    from app.api.routes_albums import router as albums_router
+    from app.api.routes_categories import router as categories_router
 
     app.include_router(auth_router, tags=["auth"])
     app.include_router(files_router, prefix="/api/files", tags=["files"])
@@ -177,6 +181,8 @@ def create_app() -> FastAPI:
     app.include_router(reindex_router, prefix="/api/reindex", tags=["reindex"])
     app.include_router(scan_router, prefix="/api/scan", tags=["scan"])
     app.include_router(tags_router, prefix="/api/tags", tags=["tags"])
+    app.include_router(albums_router, prefix="/api/albums", tags=["albums"])
+    app.include_router(categories_router, prefix="/api/categories", tags=["categories"])
     app.include_router(ui_router, tags=["ui"])
 
     @app.get("/health", tags=["system"])

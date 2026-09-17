@@ -8,10 +8,14 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaService:
-    def __init__(self, base_url: str, model: str, timeout: float = 120.0):
+    def __init__(self, base_url: str, model: str, timeout: float = 120.0, keep_alive: str = "10m"):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
+        # Wie lange Ollama das Modell nach dieser Anfrage im (V)RAM hält, bevor es selbst
+        # entlädt (Ollama-natives Feature) - so bleibt der Chat/Vision-LLM nicht dauerhaft
+        # geladen, sondern nur waehrend tatsaechlicher Nutzung plus kurzer Nachlaufzeit.
+        self.keep_alive = keep_alive
 
     def is_available(self) -> bool:
         try:
@@ -25,6 +29,7 @@ class OllamaService:
             "model": self.model,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": self.keep_alive,
         }
         if system:
             payload["system"] = system
@@ -72,7 +77,7 @@ class OllamaService:
         try:
             r = httpx.post(
                 f"{self.base_url}/api/embed",
-                json={"model": model, "input": texts},
+                json={"model": model, "input": texts, "keep_alive": self.keep_alive},
                 timeout=self.timeout,
             )
             r.raise_for_status()
@@ -83,7 +88,7 @@ class OllamaService:
             for text in texts:
                 r = httpx.post(
                     f"{self.base_url}/api/embeddings",
-                    json={"model": model, "prompt": text},
+                    json={"model": model, "prompt": text, "keep_alive": self.keep_alive},
                     timeout=self.timeout,
                 )
                 r.raise_for_status()
@@ -122,6 +127,7 @@ class OllamaService:
                     # Großes Kontextfenster für detaillierte, vollständige Antworten
                     "num_ctx": 4096,
                 },
+                "keep_alive": self.keep_alive,
             },
             timeout=self.timeout,
         )
@@ -141,5 +147,19 @@ def get_ollama_service() -> OllamaService:
             base_url=cfg.models.ollama_base_url,
             model=cfg.models.ollama_model,
             timeout=cfg.models.ollama_timeout,
+            keep_alive=cfg.models.ollama_keep_alive,
         )
     return _service
+
+
+def get_background_ollama_service() -> OllamaService:
+    """Erzeugt den separaten Ollama-Service für langsame Import-Aufgaben."""
+    from app.config import get_config
+
+    cfg = get_config()
+    return OllamaService(
+        base_url=cfg.models.ollama_base_url,
+        model=getattr(cfg.models, "background_ollama_model", "qwen2.5:7b"),
+        timeout=cfg.models.ollama_timeout,
+        keep_alive=cfg.models.ollama_keep_alive,
+    )

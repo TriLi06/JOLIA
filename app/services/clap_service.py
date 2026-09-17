@@ -22,6 +22,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from app.services import model_lifecycle
+
 logger = logging.getLogger(__name__)
 
 CLAP_SAMPLE_RATE = 48000  # von CLAP fest vorgegeben
@@ -29,6 +31,27 @@ CLAP_SAMPLE_RATE = 48000  # von CLAP fest vorgegeben
 _clap_model = None
 _clap_processor = None
 _clap_model_name: str = ""
+
+_LIFECYCLE_NAME = "clap_model"
+
+
+def _unload_clap_model() -> None:
+    global _clap_model, _clap_processor, _clap_model_name
+    _clap_model = None
+    _clap_processor = None
+    _clap_model_name = ""
+    model_lifecycle.gc_cleanup()
+
+
+model_lifecycle.register(_LIFECYCLE_NAME, _unload_clap_model)
+
+
+def _idle_unload_minutes() -> float:
+    try:
+        from app.config import get_config
+        return get_config().models.model_idle_unload_minutes
+    except Exception:
+        return 10.0
 
 
 def _get_clap_model_name() -> str:
@@ -90,6 +113,7 @@ def embed_audio(
     with torch.no_grad():
         features = _clap_model.get_audio_features(**inputs)  # type: ignore[union-attr]
         features = features / features.norm(dim=-1, keepdim=True)
+    model_lifecycle.touch(_LIFECYCLE_NAME, _idle_unload_minutes())
     return features[0].tolist()
 
 
@@ -104,4 +128,5 @@ def embed_text_clap(text: str, model_name: str | None = None) -> list[float]:
     with torch.no_grad():
         features = _clap_model.get_text_features(**inputs)  # type: ignore[union-attr]
         features = features / features.norm(dim=-1, keepdim=True)
+    model_lifecycle.touch(_LIFECYCLE_NAME, _idle_unload_minutes())
     return features[0].tolist()

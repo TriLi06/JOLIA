@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 _MAX_SUMMARY_LEN = 300
-_INPUT_LIMIT = 2000  # Maximale Eingabe für den Prompt
+_INPUT_LIMIT = 6000  # Maximale Eingabe für den Prompt (Text kommt bereits über das ganze Dokument gesampelt)
 
 
 def generate_image_summary(
@@ -17,10 +17,10 @@ def generate_image_summary(
     """Generiert eine kurze Zusammenfassung für ein Bild auf Deutsch."""
     try:
         from app.config import get_config
-        from app.services.ollama_service import get_ollama_service
+        from app.services.ollama_service import get_background_ollama_service
 
         cfg = get_config()
-        ollama = get_ollama_service()
+        ollama = get_background_ollama_service()
         if not ollama.is_available():
             return _fallback_image_summary(vision_description, face_count)
 
@@ -63,9 +63,9 @@ def generate_document_summary(text_content: str) -> str:
     if not text_content or not text_content.strip():
         return ""
     try:
-        from app.services.ollama_service import get_ollama_service
+        from app.services.ollama_service import get_background_ollama_service
 
-        ollama = get_ollama_service()
+        ollama = get_background_ollama_service()
         if not ollama.is_available():
             return _fallback_text_summary(text_content)
 

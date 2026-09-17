@@ -12,9 +12,15 @@ paths:
   backup_target: "/mnt/external_backup/jolia_backup"
 
 models:
-  embedding_model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+  embedding_model: "bge-m3"
+  embedding_backend: "ollama"
+  embedding_ollama_model: "bge-m3"
   ollama_base_url: "http://localhost:11434"
   ollama_model: "qwen2.5:3b"
+  background_ollama_model: "qwen2.5:7b"
+  categorization_ollama_model: "qwen2.5:7b"
+  vision_backend: "ollama"
+  vision_ollama_model: "minicpm-v"
   whisper_cpp_binary: ""
   whisper_model_path: ""
   ffmpeg_binary: "ffmpeg"

@@ -67,6 +67,11 @@ torch>=2.0.0
 open-clip-torch>=2.24.0
 scikit-learn>=1.4.0
 face-recognition>=1.3.0
+# face_recognition_models nutzt intern `pkg_resources`, das setuptools>=81 nicht
+# mehr mitliefert -> ohne dieses Pin schlägt "import face_recognition" beim
+# Rebuild leise fehl (is_available() faengt den resultierenden SystemExit ab),
+# es werden keine Gesichter erkannt und alte Personen-Cluster bleiben verwaist.
+setuptools<81
 
 # CLAP – Audio-/Musik-Ähnlichkeitssuche (nutzt bereits installiertes torch)
 # Modell wird beim ersten Gebrauch automatisch von HuggingFace Hub geladen.

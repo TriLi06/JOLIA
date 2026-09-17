@@ -272,7 +272,8 @@ def full_rebuild(db: Session, archive_root: Path, resume: bool = False) -> dict:
     repo.set_setting(db, "reindex_full_in_progress", job.id)
 
     try:
-        from app.db.models import Chunk, File, ProcessingJob
+        from app.db.models import Chunk, File, FileTagLink, PersonCluster, ProcessingJob, Tag
+        from sqlalchemy import and_
         saved_descriptions: dict[str, str] = {}
         snapshot: dict = {}
 
@@ -284,13 +285,32 @@ def full_rebuild(db: Session, archive_root: Path, resume: bool = False) -> dict:
                 logger.info("Rebuild: %d Nutzer-Beschreibungen gesichert.", len(saved_descriptions))
 
             # Abgeleitete Daten leeren
+            # Globale Tags werden ebenfalls neu aufgebaut: Der Snapshot stellt nur
+            # Tags wieder her, die nach dem Re-Import noch einer Datei zugeordnet sind.
+            db.query(FileTagLink).delete()
+            db.query(Tag).delete()
             db.query(Chunk).delete()
             db.query(ProcessingJob).filter(ProcessingJob.job_type != "reindex_full").delete()
             db.query(File).delete()
+            # FaceEncoding wird durch FK-CASCADE über File mitgelöscht, PersonCluster
+            # (kein FK zu File) aber nicht - ohne diesen Delete blieben Person-Cluster
+            # als Karteileichen (0 Gesichter, Platzhalterbild) über jeden Rebuild hinweg
+            # bestehen. Namen wurden bereits oben per _snapshot_manual_data gesichert
+            # und werden nach dem Re-Import via _restore_manual_data wiederhergestellt.
+            db.query(PersonCluster).delete()
             db.commit()
 
             for col in chroma_service.COLLECTIONS.values():
                 chroma_service.delete_all(col)
+        else:
+            # Bei Resume: Verwaiste Chunks löschen (file_id verweisen auf nicht-existente Dateien)
+            # Dies verhindert FOREIGN KEY constraint Fehler beim Neuimport
+            orphaned_count = db.query(Chunk).filter(
+                ~Chunk.file_id.in_(db.query(File.id).scalar_subquery())
+            ).delete()
+            if orphaned_count > 0:
+                logger.warning("Rebuild: %d verwaiste Chunks gelöscht.", orphaned_count)
+                db.commit()
 
         # Alle Original-Dateien scannen (keine Sidecars)
         original_files = [
@@ -417,8 +437,16 @@ def full_rebuild(db: Session, archive_root: Path, resume: bool = False) -> dict:
 
     except Exception as exc:
         logger.error("Reindex Modus B fehlgeschlagen: %s", exc)
-        repo.finish_job(db, job.id, success=False, error_message=str(exc))
-        repo.set_setting(db, "reindex_full_in_progress", "")
+        try:
+            db.rollback()  # Session zurücksetzen nach Fehler
+            repo.finish_job(db, job.id, success=False, error_message=str(exc))
+            repo.set_setting(db, "reindex_full_in_progress", "")
+        except Exception as cleanup_exc:
+            logger.error("Fehler beim Cleanup nach Reindex-Fehler: %s", cleanup_exc)
+            try:
+                db.rollback()
+            except:
+                pass
         return {"success": False, "error": str(exc)}
 
 

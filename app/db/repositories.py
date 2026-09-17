@@ -3,10 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
 from sqlalchemy.orm import Session
 
-from app.db.models import AppSetting, Backup, Chunk, FaceEncoding, File, FileTagLink, PersonCluster, ProcessingJob, Tag
+from app.db.models import (
+    Album, AppSetting, Backup, Category, Chunk, FaceEncoding, File, FileAlbumLink, FileTagLink,
+    PersonCluster, ProcessingJob, Tag,
+)
 
 
 def _now() -> str:
@@ -37,6 +40,7 @@ def list_files(
     db: Session,
     content_type: str | None = None,
     tags: list[str] | None = None,
+    albums: list[str] | None = None,
     status: str | None = None,
     limit: int = 100,
     offset: int = 0,
@@ -52,6 +56,14 @@ def list_files(
             .subquery()
         )
         q = q.filter(File.id.in_(tag_file_ids))
+    if albums:
+        album_file_ids = (
+            db.query(FileAlbumLink.file_id)
+            .join(Album, Album.id == FileAlbumLink.album_id)
+            .filter(Album.name.in_(albums))
+            .subquery()
+        )
+        q = q.filter(File.id.in_(album_file_ids))
     if status:
         q = q.filter(File.status == status)
     else:
@@ -62,11 +74,23 @@ def list_files(
     return items, total
 
 
+def list_review_files(db: Session, limit: int = 200, offset: int = 0) -> tuple[list[File], int]:
+    """Liefert Dateien, die wegen OCR oder KI-Kategorisierung manuell geprueft werden muessen."""
+    q = db.query(File).filter(
+        File.status != "deleted",
+        or_(File.status == "needs_review", File.category_needs_review.is_(True)),
+    )
+    total = q.count()
+    items = q.order_by(desc(File.imported_at)).limit(limit).offset(offset).all()
+    return items, total
+
+
 def _build_search_query(
     db: Session,
     q_text: str | None = None,
     content_type: str | None = None,
     tags: list[str] | None = None,
+    albums: list[str] | None = None,
     status: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -114,6 +138,14 @@ def _build_search_query(
             .subquery()
         )
         query = query.filter(File.id.in_(tag_file_ids))
+    if albums:
+        album_file_ids = (
+            db.query(FileAlbumLink.file_id)
+            .join(Album, Album.id == FileAlbumLink.album_id)
+            .filter(Album.name.in_(albums))
+            .subquery()
+        )
+        query = query.filter(File.id.in_(album_file_ids))
     if status:
         query = query.filter(File.status == status)
     else:
@@ -130,15 +162,16 @@ def search_files(
     q_text: str | None = None,
     content_type: str | None = None,
     tags: list[str] | None = None,
+    albums: list[str] | None = None,
     status: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> tuple[list[File], int]:
-    """Volltext-/Filter-Suche ueber Dateiname, Zusammenfassung, Beschreibung, Chunk-Text, Tags und Personennamen."""
+    """Volltext-/Filter-Suche ueber Dateiname, Zusammenfassung, Beschreibung, Chunk-Text, Tags/Alben und Personennamen."""
     query, has_join = _build_search_query(
-        db, q_text=q_text, content_type=content_type, tags=tags, status=status,
+        db, q_text=q_text, content_type=content_type, tags=tags, albums=albums, status=status,
         date_from=date_from, date_to=date_to,
     )
     total = query.with_entities(func.count(func.distinct(File.id))).scalar() or 0
@@ -159,13 +192,14 @@ def count_files_by_day(
     q_text: str | None = None,
     content_type: str | None = None,
     tags: list[str] | None = None,
+    albums: list[str] | None = None,
     status: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
 ) -> list[dict]:
     """Zaehlt Dateien pro Kalendertag (fuer die Timeline-Uebersicht) - guenstig auch bei sehr vielen Dateien."""
     query, _ = _build_search_query(
-        db, q_text=q_text, content_type=content_type, tags=tags, status=status,
+        db, q_text=q_text, content_type=content_type, tags=tags, albums=albums, status=status,
         date_from=date_from, date_to=date_to,
     )
     day = _day_expr()
@@ -185,6 +219,7 @@ def list_files_for_day(
     q_text: str | None = None,
     content_type: str | None = None,
     tags: list[str] | None = None,
+    albums: list[str] | None = None,
     status: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -192,7 +227,7 @@ def list_files_for_day(
 ) -> list[File]:
     """Liefert die Dateien eines einzelnen Kalendertags (fuer das lazy-Laden der Timeline)."""
     query, has_join = _build_search_query(
-        db, q_text=q_text, content_type=content_type, tags=tags, status=status,
+        db, q_text=q_text, content_type=content_type, tags=tags, albums=albums, status=status,
         date_from=date_from, date_to=date_to,
     )
     day_col = _day_expr()
@@ -211,6 +246,7 @@ def list_files_by_day(
     q_text: str | None = None,
     content_type: str | None = None,
     tags: list[str] | None = None,
+    albums: list[str] | None = None,
     status: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -218,10 +254,29 @@ def list_files_by_day(
 ) -> list[File]:
     """Wie search_files, aber ohne Pagination - fuer Timeline-Gruppierung nach Tag im API-Layer."""
     items, _ = search_files(
-        db, q_text=q_text, content_type=content_type, tags=tags, status=status,
+        db, q_text=q_text, content_type=content_type, tags=tags, albums=albums, status=status,
         date_from=date_from, date_to=date_to, limit=limit, offset=0,
     )
     return items
+
+
+def list_file_ids_for_filter(
+    db: Session,
+    q_text: str | None = None,
+    content_type: str | None = None,
+    tags: list[str] | None = None,
+    albums: list[str] | None = None,
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[str]:
+    """Liefert nur die File-IDs, die zum Filter passen (ohne Pagination) - fuer Album-Massenoperationen."""
+    query, _ = _build_search_query(
+        db, q_text=q_text, content_type=content_type, tags=tags, albums=albums, status=status,
+        date_from=date_from, date_to=date_to,
+    )
+    rows = query.with_entities(File.id).distinct().all()
+    return [row[0] for row in rows]
 
 
 def soft_delete_file(db: Session, file_id: str) -> None:
@@ -440,8 +495,229 @@ def get_recent_files(db: Session, limit: int = 10) -> list[File]:
 
 
 # ---------------------------------------------------------------------------
-# Chunk repository
+# Album repository (spezielle Tags mit Namen + optionaler Beschreibung)
 # ---------------------------------------------------------------------------
+
+def list_albums(db: Session) -> list[tuple[Album, int]]:
+    """Liefert alle Alben mit Nutzungszaehler (Anzahl verknuepfter Dateien), alphabetisch sortiert."""
+    rows = (
+        db.query(Album, func.count(FileAlbumLink.file_id))
+        .outerjoin(FileAlbumLink, FileAlbumLink.album_id == Album.id)
+        .group_by(Album.id)
+        .order_by(Album.name)
+        .all()
+    )
+    return [(album, count) for album, count in rows]
+
+
+def get_album_by_name(db: Session, name: str) -> Optional[Album]:
+    return db.query(Album).filter(Album.name == name).first()
+
+
+def get_album_by_id(db: Session, album_id: str) -> Optional[Album]:
+    return db.get(Album, album_id)
+
+
+def create_album(db: Session, name: str, description: str | None = None, created_by: str = "user") -> Album:
+    album = Album(name=name, description=description, created_by=created_by)
+    db.add(album)
+    db.commit()
+    db.refresh(album)
+    return album
+
+
+def delete_album(db: Session, album_id: str) -> None:
+    """Loescht ein Album; die Verknuepfungen zu Dateien fallen per Cascade weg."""
+    album = get_album_by_id(db, album_id)
+    if album:
+        db.delete(album)
+        db.commit()
+
+
+def update_album(db: Session, album_id: str, name: str, description: str | None) -> Optional[Album]:
+    album = get_album_by_id(db, album_id)
+    if not album:
+        return None
+    album.name = name
+    album.description = description
+    db.commit()
+    db.refresh(album)
+    return album
+
+
+def get_albums_for_file(db: Session, file_id: str) -> list[Album]:
+    return (
+        db.query(Album)
+        .join(FileAlbumLink, FileAlbumLink.album_id == Album.id)
+        .filter(FileAlbumLink.file_id == file_id)
+        .order_by(Album.name)
+        .all()
+    )
+
+
+def add_file_album(db: Session, file_id: str, album_id: str, added_by: str = "user") -> None:
+    """Verknuepft eine Datei mit einem bestehenden Album; idempotent."""
+    link = (
+        db.query(FileAlbumLink)
+        .filter(FileAlbumLink.file_id == file_id, FileAlbumLink.album_id == album_id)
+        .first()
+    )
+    if not link:
+        db.add(FileAlbumLink(file_id=file_id, album_id=album_id, added_by=added_by))
+        db.commit()
+
+
+def remove_file_album(db: Session, file_id: str, album_id: str) -> None:
+    """Entfernt die Verknuepfung eines Albums von einer Datei; das Album selbst bleibt bestehen."""
+    db.query(FileAlbumLink).filter(
+        FileAlbumLink.file_id == file_id, FileAlbumLink.album_id == album_id
+    ).delete()
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Category repository (hierarchischer Baum, genau ein Knoten je Datei)
+# ---------------------------------------------------------------------------
+
+def list_categories(db: Session) -> list[Category]:
+    """Liefert alle Kategorie-Knoten (flach, Client/Service baut daraus den Baum)."""
+    return db.query(Category).order_by(Category.name).all()
+
+
+def get_category_by_id(db: Session, category_id: str) -> Optional[Category]:
+    return db.get(Category, category_id)
+
+
+def get_child_category_by_name(db: Session, parent_id: str | None, name: str) -> Optional[Category]:
+    """Sucht einen Knoten mit gegebenem Namen unter einem Elternknoten (case-insensitive)."""
+    q = db.query(Category).filter(func.lower(Category.name) == func.lower(name))
+    if parent_id is None:
+        q = q.filter(Category.parent_id.is_(None))
+    else:
+        q = q.filter(Category.parent_id == parent_id)
+    return q.first()
+
+
+def create_category(
+    db: Session, name: str, parent_id: str | None = None, created_by: str = "user"
+) -> Category:
+    category = Category(name=name, parent_id=parent_id, created_by=created_by)
+    db.add(category)
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+def rename_category(db: Session, category_id: str, name: str) -> Optional[Category]:
+    category = get_category_by_id(db, category_id)
+    if not category:
+        return None
+    category.name = name
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+def get_category_descendant_ids(db: Session, category_id: str) -> set[str]:
+    """Sammelt die IDs eines Knotens und aller seiner Nachfahren (fuer Zyklus-Checks/Subtree-Filter)."""
+    all_categories = list_categories(db)
+    children_by_parent: dict[str | None, list[str]] = {}
+    for c in all_categories:
+        children_by_parent.setdefault(c.parent_id, []).append(c.id)
+    result: set[str] = set()
+    stack = [category_id]
+    while stack:
+        current = stack.pop()
+        if current in result:
+            continue
+        result.add(current)
+        stack.extend(children_by_parent.get(current, []))
+    return result
+
+
+def move_category(db: Session, category_id: str, new_parent_id: str | None) -> Category:
+    """Verschiebt einen Knoten unter einen neuen Elternknoten; verhindert Zyklen (Verschieben in eigenen Teilbaum)."""
+    category = get_category_by_id(db, category_id)
+    if not category:
+        raise ValueError("Kategorie nicht gefunden.")
+    if new_parent_id:
+        if new_parent_id == category_id:
+            raise ValueError("Eine Kategorie kann nicht ihr eigener Elternknoten sein.")
+        if new_parent_id in get_category_descendant_ids(db, category_id):
+            raise ValueError("Eine Kategorie kann nicht in ihren eigenen Teilbaum verschoben werden.")
+        if not get_category_by_id(db, new_parent_id):
+            raise ValueError("Ziel-Kategorie nicht gefunden.")
+    category.parent_id = new_parent_id
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+def delete_category(db: Session, category_id: str) -> None:
+    """Loescht einen Kategorie-Knoten; nur zulaessig wenn er keine Kinder/Dateien hat (Service prueft das)."""
+    category = get_category_by_id(db, category_id)
+    if category:
+        db.delete(category)
+        db.commit()
+
+
+def count_files_in_category(db: Session, category_id: str) -> int:
+    return db.query(File).filter(File.category_id == category_id).count()
+
+
+def count_files_by_category(db: Session) -> dict[str, int]:
+    """Liefert Datei-Anzahl je Kategorie-ID (nur direkt zugeordnete Dateien, kein Subtree)."""
+    rows = (
+        db.query(File.category_id, func.count(File.id))
+        .filter(File.category_id.isnot(None), File.status != "deleted")
+        .group_by(File.category_id)
+        .all()
+    )
+    return {cat_id: int(count) for cat_id, count in rows}
+
+
+def list_files_for_category(
+    db: Session, category_ids: list[str], status: str | None = None, limit: int = 500, offset: int = 0
+) -> tuple[list[File], int]:
+    """Liefert Dateien fuer eine Menge von Kategorie-IDs (z.B. Knoten + Subtree)."""
+    q = db.query(File).filter(File.category_id.in_(category_ids))
+    if status:
+        q = q.filter(File.status == status)
+    else:
+        q = q.filter(File.status != "deleted")
+    total = q.count()
+    items = q.order_by(desc(func.coalesce(File.created_at, File.imported_at))).limit(limit).offset(offset).all()
+    return items, total
+
+
+def list_uncategorized_files(db: Session, limit: int = 1000) -> list[File]:
+    """Liefert unkategorisierte, verarbeitete Dateien (fuer die Batch-Nachkategorisierung)."""
+    return (
+        db.query(File)
+        .filter(File.category_id.is_(None), File.status.in_(["processed", "needs_review"]))
+        .order_by(File.imported_at)
+        .limit(limit)
+        .all()
+    )
+
+
+def assign_file_category(
+    db: Session, file_id: str, category_id: str | None, assigned_by: str, needs_review: bool = False,
+    ai_response: str | None = None, review_reason: str | None = None,
+) -> None:
+    f = db.get(File, file_id)
+    if not f:
+        return
+    f.category_id = category_id
+    f.category_assigned_by = assigned_by if category_id else None
+    f.category_needs_review = needs_review
+    if ai_response is not None:
+        f.category_ai_response = ai_response
+    f.category_review_reason = review_reason if needs_review else None
+    db.commit()
+
+
+
 
 def create_chunk(db: Session, **kwargs) -> Chunk:
     c = Chunk(**kwargs)
@@ -503,13 +779,17 @@ def finish_job(
     error_message: str | None = None,
     log: str | None = None,
 ) -> None:
-    job = db.get(ProcessingJob, job_id)
-    if job:
-        job.status = "done" if success else "failed"
-        job.finished_at = _now()
-        job.error_message = error_message
-        job.log = log
-        db.commit()
+    try:
+        job = db.get(ProcessingJob, job_id)
+        if job:
+            job.status = "done" if success else "failed"
+            job.finished_at = _now()
+            job.error_message = error_message
+            job.log = log
+            db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
 
 def list_jobs(
@@ -574,11 +854,15 @@ def get_setting(db: Session, key: str) -> Optional[str]:
 
 
 def set_setting(db: Session, key: str, value: str) -> None:
-    s = db.get(AppSetting, key)
-    if s:
-        s.value = value
-        s.updated_at = _now()
-    else:
-        s = AppSetting(key=key, value=value, updated_at=_now())
-        db.add(s)
-    db.commit()
+    try:
+        s = db.get(AppSetting, key)
+        if s:
+            s.value = value
+            s.updated_at = _now()
+        else:
+            s = AppSetting(key=key, value=value, updated_at=_now())
+            db.add(s)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise

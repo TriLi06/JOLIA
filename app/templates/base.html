@@ -18,6 +18,7 @@
         <symbol id="i-jobs" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></symbol>
         <symbol id="i-review" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></symbol>
         <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+        <symbol id="i-tree" viewBox="0 0 24 24"><line x1="12" y1="2" x2="12" y2="22"/><path d="M12 6H6a2 2 0 0 0-2 2v2"/><path d="M12 14h6a2 2 0 0 0 2-2v-2"/><circle cx="4" cy="12" r="2"/><circle cx="20" cy="8" r="2"/><circle cx="12" cy="2" r="2"/></symbol>
     </svg>
 
     <header class="app-nav">
@@ -29,6 +30,7 @@
 
             <nav class="nav-primary" aria-label="Hauptnavigation">
                 <a href="/files" data-nav="/files"><svg class="icon"><use href="#i-timeline"/></svg><span>Timeline</span></a>
+                <a href="/categories" data-nav="/categories"><svg class="icon"><use href="#i-tree"/></svg><span>Kategorien</span></a>
                 <a href="/search" data-nav="/search"><svg class="icon"><use href="#i-search"/></svg><span>Suche</span></a>
                 <a href="/chat" data-nav="/chat"><svg class="icon"><use href="#i-chat"/></svg><span>Chat</span></a>
             </nav>
@@ -63,6 +65,15 @@
     </div>
     <div id="file-sidebar-overlay" class="file-sidebar-overlay" onclick="closeDetail()" style="display:none"></div>
 
+    <!-- Globale Vollbild-Ansicht fuer einzelne Dateien (Bild/PDF/Text), aus der Detail-Sidebar heraus -->
+    <div id="file-fullscreen" class="file-fullscreen" style="display:none">
+        <button id="ff-close" class="ff-close" onclick="closeFullscreenViewer()" title="Schließen" aria-label="Schließen">✕</button>
+        <button id="ff-prev" class="ff-nav ff-prev" onclick="fullscreenNav(-1)" title="Vorherige Datei" aria-label="Vorherige Datei" style="display:none">‹</button>
+        <button id="ff-next" class="ff-nav ff-next" onclick="fullscreenNav(1)" title="Nächste Datei" aria-label="Nächste Datei" style="display:none">›</button>
+        <div id="ff-content" class="ff-content"></div>
+        <button id="ff-play" class="ff-play" onclick="toggleFullscreenPlay()" title="Automatisch weiterblättern" aria-label="Automatisch weiterblättern">▶</button>
+    </div>
+
     <script>
         // Aktiven Navigationspunkt anhand des Pfad-Präfixes markieren.
         (function () {
@@ -84,6 +95,7 @@
         }).catch(function () {});
     </script>
     <script src="/static/app.js"></script>
+    <script src="/static/file-viewer.js"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

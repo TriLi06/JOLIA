@@ -23,11 +23,17 @@ paths:
   backup_target: "/data/backup"
 
 models:
-  embedding_model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-  embedding_backend: "sentence-transformers"
+  embedding_model: "bge-m3"
+  embedding_backend: "ollama"
   embedding_device: "cpu"
+  embedding_ollama_model: "bge-m3"
   ollama_base_url: "http://ollama:11434"
   ollama_model: "qwen2.5:3b"
+  background_ollama_model: "qwen2.5:7b"
+  categorization_ollama_model: "qwen2.5:7b"
+  ollama_keep_alive: "10m"
+  vision_backend: "ollama"
+  vision_ollama_model: "minicpm-v"
   ffmpeg_binary: "ffmpeg"
   # Audio-/Video-Transkription via openai-whisper (CPU)
   whisper_python_model: "base"

@@ -290,6 +290,10 @@ main.container:has(> .files-fullbleed) {
     max-height: calc(100vh - 80px);
     overflow-y: auto;
 }
+.category-layout .context-sidebar {
+    flex-basis: 340px;
+    width: 340px;
+}
 .files-layout.context-collapsed .context-sidebar {
     display: none;
 }
@@ -330,12 +334,13 @@ main.container:has(> .files-fullbleed) {
 }
 
 /* ============================================================
-   Jira-artige Tag-Mehrfachauswahl (Badges in einer Zeile)
+   Jira-artige Mehrfachauswahl (Badges in einer Zeile) - wird von
+   Tags UND Alben genutzt (Farbe kommt von .tag-token/.album-token)
    ============================================================ */
-.tag-select {
+.token-select {
     position: relative;
 }
-.tag-select-control {
+.token-select-control {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -347,24 +352,33 @@ main.container:has(> .files-fullbleed) {
     border-radius: 6px;
     cursor: text;
 }
-.tag-select-control.focused {
+.token-select-control.focused {
     border-color: #2f81f7;
     box-shadow: 0 0 0 3px rgba(47, 129, 247, 0.3);
 }
-.tag-token {
+.tag-token,
+.album-token {
     display: inline-flex;
     align-items: center;
     gap: 0.2rem;
     padding: 0.1rem 0.1rem 0.1rem 0.5rem;
-    background: rgba(31, 111, 235, 0.2);
-    color: #79c0ff;
-    border: 1px solid rgba(31, 111, 235, 0.35);
     border-radius: 999px;
     font-size: 0.75rem;
     font-weight: 600;
     white-space: nowrap;
 }
-.tag-token button {
+.tag-token {
+    background: rgba(31, 111, 235, 0.2);
+    color: #79c0ff;
+    border: 1px solid rgba(31, 111, 235, 0.35);
+}
+.album-token {
+    background: rgba(163, 113, 247, 0.2);
+    color: #d2a8ff;
+    border: 1px solid rgba(163, 113, 247, 0.35);
+}
+.tag-token button,
+.album-token button {
     background: none;
     border: none;
     color: inherit;
@@ -380,7 +394,11 @@ main.container:has(> .files-fullbleed) {
     background: rgba(31, 111, 235, 0.4);
     color: #fff;
 }
-.tag-select-input {
+.album-token button:hover {
+    background: rgba(163, 113, 247, 0.4);
+    color: #fff;
+}
+.token-select-input {
     flex: 1 1 60px;
     min-width: 60px;
     border: none;
@@ -392,7 +410,7 @@ main.container:has(> .files-fullbleed) {
     margin: 0;
     box-shadow: none;
 }
-.tag-select-dropdown {
+.token-select-dropdown {
     position: absolute;
     z-index: 60;
     left: 0;
@@ -405,7 +423,7 @@ main.container:has(> .files-fullbleed) {
     border-radius: 6px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
-.tag-select-option {
+.token-select-option {
     display: flex;
     justify-content: space-between;
     gap: 0.5rem;
@@ -413,18 +431,84 @@ main.container:has(> .files-fullbleed) {
     cursor: pointer;
     font-size: 0.85rem;
 }
-.tag-select-option:hover,
-.tag-select-option.active {
+.token-select-option:hover,
+.token-select-option.active {
     background: #21262d;
 }
-.tag-select-option .count {
+.token-select-option .count {
     color: var(--pico-muted-color);
     font-size: 0.75rem;
 }
-.tag-select-empty {
+.token-select-empty {
     padding: 0.5rem 0.6rem;
     color: var(--pico-muted-color);
     font-size: 0.8rem;
+}
+
+.album-manage-link {
+    display: inline-block;
+    margin-top: 0.35rem;
+    font-size: 0.85rem;
+}
+
+/* Album-Verwaltungsmenü (neben dem Filter-Menü in der Timeline-Ansicht) */
+.album-sidebar {
+    flex: 0 0 260px;
+    width: 260px;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    position: sticky;
+    top: 64px;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+}
+.album-sidebar.album-collapsed {
+    display: none;
+}
+.album-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 0.75rem 0;
+}
+.album-list-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    padding: 0.35rem 0.4rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+.album-list-item:hover {
+    background: rgba(163, 113, 247, 0.1);
+}
+.album-list-item .album-list-name {
+    font-weight: 600;
+    color: #d2a8ff;
+}
+.album-list-item .album-list-desc {
+    display: block;
+    color: var(--pico-muted-color);
+    font-size: 0.75rem;
+}
+.album-list-item .album-list-count {
+    color: var(--pico-muted-color);
+    font-size: 0.72rem;
+}
+.album-bulk-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+.album-bulk-actions button {
+    width: auto;
+    margin: 0;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.9rem;
+    font-weight: 700;
 }
 
 @media (max-width: 900px) {
@@ -437,7 +521,8 @@ main.container:has(> .files-fullbleed) {
     .files-main {
         width: 100%;
     }
-    .context-sidebar {
+    .context-sidebar,
+    .album-sidebar {
         position: static;
         width: 100%;
         flex: 0 0 auto;
@@ -545,6 +630,30 @@ nav .brand {
     margin: 0;
 }
 
+/* Album-Badges (Datei-Detail) - wie Tag-Badges, aber andere Farbe */
+.album-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: rgba(163, 113, 247, 0.2);
+    color: #d2a8ff;
+    border: 1px solid rgba(163, 113, 247, 0.35);
+}
+.album-badge button {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 0;
+    margin: 0;
+}
+
 /* Personen-Badges (erkannte Gesichter im Datei-Detail) */
 .person-badge {
     display: inline-flex;
@@ -602,6 +711,118 @@ nav .brand {
     background: rgba(0,0,0,0.25);
     z-index: 999;
 }
+
+/* Klickbarer Vorschaubereich im Detail-Panel (öffnet die Vollbild-Ansicht) */
+.clickable-preview {
+    cursor: pointer;
+}
+.clickable-preview:hover .file-detail-thumb {
+    opacity: 0.85;
+}
+.file-preview-placeholder {
+    cursor: pointer;
+    text-align: center;
+}
+
+/* Vollbild-Ansicht für einzelne Dateien (Bild/PDF/Text) */
+.file-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 2100;
+    background: rgba(0,0,0,0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.ff-content {
+    max-width: 92vw;
+    max-height: 92vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.ff-content img,
+.ff-content iframe,
+.ff-content video {
+    max-width: 92vw;
+    max-height: 92vh;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border: none;
+}
+.ff-content iframe {
+    width: 85vw;
+    height: 90vh;
+    background: #fff;
+    border-radius: var(--border-radius);
+}
+.ff-content audio {
+    width: min(480px, 90vw);
+}
+.ff-content pre {
+    max-width: 800px;
+    max-height: 88vh;
+    overflow: auto;
+    background: var(--card-background-color, #fff);
+    color: var(--color);
+    padding: 1.5rem;
+    border-radius: var(--border-radius);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-size: 0.9rem;
+}
+.ff-content .ff-loading,
+.ff-content .ff-error {
+    color: #fff;
+    font-size: 0.95rem;
+}
+.ff-close,
+.ff-nav,
+.ff-play {
+    position: absolute;
+    background: rgba(0,0,0,0.4);
+    color: #fff;
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+    line-height: 1;
+    opacity: 0.5;
+    transition: opacity 0.15s ease;
+}
+.ff-close:hover,
+.ff-nav:hover,
+.ff-play:hover {
+    opacity: 1;
+}
+.ff-close {
+    top: 1rem;
+    right: 1rem;
+    width: 2.5rem;
+    height: 2.5rem;
+    font-size: 1.2rem;
+}
+.ff-nav {
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3rem;
+    height: 3rem;
+    font-size: 1.8rem;
+}
+.ff-prev { left: 1rem; }
+.ff-next { right: 1rem; }
+.ff-play {
+    bottom: 1.5rem;
+    right: 1.5rem;
+    width: 3rem;
+    height: 3rem;
+    font-size: 1.2rem;
+}
+.ff-play.is-active {
+    opacity: 0.9;
+    background: var(--primary, #6ea8fe);
+}
+
 
 /* Chunks-Bereich in der Detailansicht: Titel nur einmal, klappbar */
 .chunks-details {
@@ -1202,7 +1423,8 @@ footer {
 
 /* Nur solange die Sidebar noch neben dem Inhalt steht (siehe 900px-Umbruch) */
 @media (min-width: 901px) and (max-width: 1024px) {
-    .context-sidebar {
+    .context-sidebar,
+    .album-sidebar {
         flex: 0 0 210px;
         width: 210px;
     }
@@ -1253,7 +1475,7 @@ footer {
     textarea,
     .filter-field input,
     .filter-field select,
-    .tag-select-input {
+    .token-select-input {
         font-size: 16px;
     }
 
@@ -1298,7 +1520,8 @@ footer {
     .files-layout {
         gap: 0.75rem;
     }
-    .context-sidebar {
+    .context-sidebar,
+    .album-sidebar {
         padding: 0.75rem;
     }
     .virtual-scroll {
@@ -1443,6 +1666,7 @@ footer {
         font-size: 1.05rem;
     }
     .context-toggle,
+    .album-toggle,
     .view-switch button {
         padding: 0.4rem 0.5rem;
         font-size: 0.8rem;
@@ -1481,4 +1705,208 @@ footer {
 
 .scan-page-remove:hover {
     background: var(--del-color, #c0392b);
+}
+
+/* Kategorien-Seite: Baum links, Dateiliste rechts (siehe categories.html/.js) */
+.category-tree-list {
+    list-style: none;
+    margin: 0;
+    padding-left: 0;
+}
+.category-tree-list .category-tree-list {
+    margin-left: 0.85rem;
+    border-left: 1px solid var(--pico-muted-border-color);
+    padding-left: 0.35rem;
+}
+.category-sidebar-header,
+.category-files-header,
+.category-action-row,
+.category-file-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.category-sidebar-header {
+    justify-content: space-between;
+}
+.category-icon-button {
+    min-width: 2rem;
+    width: 2rem;
+    padding-inline: 0;
+}
+.category-tree {
+    max-height: min(52dvh, 40rem);
+    overflow: auto;
+    margin-top: 0.65rem;
+}
+.category-tree-item.is-drag-over {
+    background: rgba(163, 113, 247, 0.2);
+    border-color: var(--pico-primary);
+}
+.category-tree-item {
+    border-radius: 6px;
+    font-size: 0.85rem;
+}
+.category-tree-row {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    min-width: 0;
+    padding: 0.2rem;
+}
+.category-tree-row:hover {
+    background: rgba(163, 113, 247, 0.1);
+}
+.category-expander,
+.category-expander-spacer {
+    flex: 0 0 1.4rem;
+    min-width: 1.4rem;
+    width: 1.4rem;
+    height: 1.4rem;
+    padding: 0;
+    line-height: 1;
+}
+.category-tree-select,
+.category-file-name {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+}
+.category-tree-select {
+    flex: 1;
+    overflow-wrap: break-word;
+}
+.category-edit-toggle {
+    flex: 0 0 auto;
+    width: 1.45rem;
+    height: 1.45rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--pico-muted-color);
+    font-size: 0.9rem;
+    line-height: 1;
+}
+.category-edit-toggle:hover,
+.category-edit-toggle:focus-visible {
+    color: var(--pico-primary);
+    background: rgba(163, 113, 247, 0.1);
+}
+.category-rename-input {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0.2rem 0.35rem;
+    font-size: 0.85rem;
+}
+.category-tree-item.is-selected > .category-tree-row .category-tree-select {
+    color: #d2a8ff;
+    font-weight: 600;
+}
+.category-tree-item.is-dragging,
+.category-file-row.is-dragging {
+    opacity: 0.45;
+}
+.category-inline-actions {
+    display: grid;
+    gap: 0.45rem;
+    margin: 0.25rem 0 0.5rem 1.8rem;
+    padding: 0.5rem;
+    border-left: 2px solid var(--pico-primary);
+    background: rgba(163, 113, 247, 0.06);
+    font-size: 0.82rem;
+}
+.category-inline-actions button,
+.category-inline-actions select {
+    width: 100%;
+    margin: 0;
+    font-size: 0.78rem;
+    padding: 0.35rem 0.5rem;
+}
+.category-inline-actions label {
+    display: grid;
+    gap: 0.2rem;
+    color: var(--pico-muted-color);
+}
+.category-file-actions select {
+    min-width: 0;
+    margin: 0;
+}
+.category-files-header {
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+}
+.category-files-header h2 {
+    margin-bottom: 0.1rem;
+}
+.category-file-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.category-file-actions select {
+    max-width: 15rem;
+}
+.category-file-select {
+    flex: 0 0 auto;
+    margin: 0;
+}
+.category-tree-count {
+    color: var(--pico-muted-color);
+    font-size: 0.72rem;
+    margin-left: 0.25rem;
+}
+.category-files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.category-file-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    border: 1px solid var(--pico-muted-border-color);
+    cursor: pointer;
+}
+.category-file-row:hover {
+    background: rgba(163, 113, 247, 0.1);
+}
+.category-file-icon {
+    flex: 0 0 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+}
+.category-file-icon img {
+    width: 28px;
+    height: 28px;
+    object-fit: cover;
+    border-radius: 4px;
+}
+.category-file-name {
+    flex: 1 1 auto;
+    overflow-wrap: break-word;
+    cursor: pointer;
+}
+
+@media (max-width: 768px) {
+    .category-tree {
+        max-height: 35dvh;
+    }
+    .category-files-header,
+    .category-file-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+    .category-file-actions select {
+        max-width: none;
+    }
 }

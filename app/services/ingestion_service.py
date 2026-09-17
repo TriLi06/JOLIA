@@ -129,9 +129,38 @@ def import_file(file_path: Path, db: Session, archive_root: Path) -> dict:
     file_size = file_path.stat().st_size
     now = datetime.now()
 
+    # Reindex-Fall: Datei liegt schon archiviert unter GUID-Namen (voller Rebuild
+    # scannt direkt das Archiv) - echten Originalnamen und bereits ermitteltes
+    # Erstellungsdatum aus dem noch vorhandenen Sidecar wiederherstellen, statt
+    # den GUID-Dateinamen zu uebernehmen bzw. das Datum neu (und ggf. schlechter,
+    # z.B. ohne Dateisystem-mtime) zu bestimmen.
+    original_filename = file_path.name
+    recovered_created_at = None
+    from app.services import sidecar_service
+    old_sidecar = sidecar_service.read_json_sidecar(file_path)
+    if old_sidecar and old_sidecar.get("original_filename"):
+        original_filename = old_sidecar["original_filename"]
+    if old_sidecar and old_sidecar.get("created_at"):
+        recovered_created_at = old_sidecar["created_at"]
+
+    # Ordnerstruktur (Jahr/Monat) am tatsächlichen Änderungsdatum der Datei
+    # ausrichten statt am Importzeitpunkt - sonst wandern beim Reindizieren
+    # bereits archivierte Dateien jedes Mal in einen neuen "aktueller Monat"-Ordner.
+    try:
+        folder_date = datetime.fromtimestamp(file_path.stat().st_mtime)
+    except OSError:
+        folder_date = now
+
     file_id = str(uuid.uuid4())
-    target_path = calculate_archive_path(archive_root, file_path.name, content_type, now, file_id)
+    target_path = calculate_archive_path(archive_root, original_filename, content_type, folder_date, file_id)
     target_path = move_to_archive(file_path, target_path)
+    # Alte, jetzt verwaiste Sidecars der bereits archivierten Datei entfernen
+    # (neue werden bei der Verarbeitung am neuen Pfad frisch erzeugt).
+    if old_sidecar is not None:
+        old_json = file_path.parent / (file_path.name + ".json")
+        old_md = file_path.parent / (file_path.name + ".md")
+        old_json.unlink(missing_ok=True)
+        old_md.unlink(missing_ok=True)
     # Relativ zu archive_root speichern, damit ein Umbenennen/Verschieben des
     # Archiv-Root-Ordners bereits importierte Dateien nicht verwaist.
     relative_archive_path = target_path.relative_to(archive_root)
@@ -139,19 +168,20 @@ def import_file(file_path: Path, db: Session, archive_root: Path) -> dict:
         db,
         id=file_id,
         sha256=sha256,
-        original_filename=file_path.name,
+        original_filename=original_filename,
         archive_path=str(relative_archive_path),
         mime_type=mime_type,
         content_type=content_type,
         file_size=file_size,
         imported_at=now.isoformat(),
+        created_at=recovered_created_at,
         status="imported",
     )
 
     return {
         "status": "imported",
         "file_id": file_record.id,
-        "filename": file_path.name,
+        "filename": original_filename,
         "archive_path": str(relative_archive_path),
         "mime_type": mime_type,
         "content_type": content_type,
@@ -315,9 +345,11 @@ def process_file(file_id: str, db: Session) -> None:
                     face_count=sidecar_data_for_summary.get("face_count") if sidecar_data_for_summary else face_count or None,
                 )
             else:
-                # Für Dokumente: ersten Chunk-Text nutzen
-                first_chunk_text = result.chunks[0].text if result.chunks else ""
-                ai_summary = summarization_service.generate_document_summary(first_chunk_text)
+                # Für Dokumente: Text über das gesamte Dokument verteilt sampeln (nicht nur den ersten Chunk),
+                # damit auch lange Texte vollständig in die Zusammenfassung einfließen.
+                from app.services import chunking_service
+                sampled_text = chunking_service.sample_chunk_texts([c.text for c in result.chunks]) if result.chunks else ""
+                ai_summary = summarization_service.generate_document_summary(sampled_text)
             if ai_summary:
                 repo.update_file_summary(db, file_id, ai_summary)
                 # In Sidecar-JSON speichern
@@ -343,25 +375,59 @@ def process_file(file_id: str, db: Session) -> None:
             logger.warning("KI-Zusammenfassung fehlgeschlagen für %s: %s", file_record.original_filename, sum_exc)
 
         # Tags (z.B. Rechnung, Arzt, Homöopathie) per KI ermitteln und zuweisen
+        assigned_tags: list[str] = []
         if cfg.processing.enable_tag_suggestion:
             try:
-                from app.services import tag_service
-                context_text = ai_summary or (result.chunks[0].text if result.chunks else "")
-                assigned = tag_service.suggest_and_assign_tags(
+                from app.services import tag_service, chunking_service
+                context_text = ai_summary or (
+                    chunking_service.sample_chunk_texts([c.text for c in result.chunks]) if result.chunks else ""
+                )
+                assigned_tags = tag_service.suggest_and_assign_tags(
                     db, file_id, context_text, is_image=file_record.content_type == "images"
                 )
-                if assigned:
-                    logger.info("Tags %s zugewiesen für %s", assigned, file_record.original_filename)
+                if assigned_tags:
+                    logger.info("Tags %s zugewiesen für %s", assigned_tags, file_record.original_filename)
             except Exception as tag_exc:
                 logger.warning(
                     "Tag-Vorschlag fehlgeschlagen für %s: %s",
                     file_record.original_filename, tag_exc,
                 )
 
+        # Kategorie (Brotkrumen-Pfad, z.B. Dokumente > Rechnungen > Auto) per KI ermitteln und zuweisen
+        if cfg.processing.enable_auto_categorization:
+            try:
+                from app.services import category_service, chunking_service
+                context_text = ai_summary or (
+                    chunking_service.sample_chunk_texts([c.text for c in result.chunks]) if result.chunks else ""
+                )
+                category_created_at = file_record.created_at or result.created_at
+                if not category_created_at and file_record.content_type == "documents":
+                    from app.services import document_date_service
+                    doc_text = "\n".join(c.text for c in result.chunks[:5]) if result.chunks else ""
+                    category_created_at = document_date_service.extract_document_date(doc_text)
+                if not category_created_at:
+                    try:
+                        category_created_at = datetime.fromtimestamp(file_path.stat().st_mtime).isoformat()
+                    except OSError:
+                        pass
+                path = category_service.suggest_and_assign_category(
+                    db, file_id, context_text, file_record.content_type, tags=assigned_tags,
+                    sidecar_path=file_path, created_at=category_created_at,
+                )
+                if path:
+                    logger.info("Kategorie '%s' zugewiesen für %s", path, file_record.original_filename)
+            except Exception as cat_exc:
+                logger.warning(
+                    "Kategorie-Vorschlag fehlgeschlagen für %s: %s",
+                    file_record.original_filename, cat_exc,
+                )
+
         # Inhaltliches Erstellungsdatum fuer die Timeline bestimmen:
         # Bilder liefern es aus EXIF (result.created_at), fuer Dokumente wird ein
         # beschriftetes Belegdatum (z.B. Rechnungsdatum) aus dem Text extrahiert.
-        created_at = result.created_at
+        # Bereits beim Import aus einem alten Sidecar wiederhergestelltes Datum
+        # hat Vorrang (stabil ueber Reindizierungen hinweg, siehe import_file()).
+        created_at = locals().get("category_created_at") or file_record.created_at or result.created_at
         if not created_at and file_record.content_type == "documents":
             try:
                 from app.services import document_date_service
@@ -369,8 +435,24 @@ def process_file(file_id: str, db: Session) -> None:
                 created_at = document_date_service.extract_document_date(doc_text)
             except Exception as date_exc:
                 logger.warning("Datumserkennung fehlgeschlagen für %s: %s", file_record.original_filename, date_exc)
+        # Letzter Fallback: Änderungsdatum der Originaldatei (bleibt bei Kopieren/
+        # Verschieben/Reindizieren erhalten, anders als das unzuverlässige
+        # Windows-"Erstellt"-Datum) - deutlich aussagekräftiger als der reine
+        # Importzeitpunkt, besonders bei Audio/Video ohne extrahierbares Datum.
+        if not created_at:
+            try:
+                created_at = datetime.fromtimestamp(file_path.stat().st_mtime).isoformat()
+            except OSError as date_exc:
+                logger.warning("Änderungsdatum nicht lesbar für %s: %s", file_record.original_filename, date_exc)
         if created_at:
             repo.update_file_created_at(db, file_id, created_at)
+            # Dauerhaft im Sidecar sichern, damit es einen Reindex uebersteht, auch
+            # wenn die Dateisystem-mtime dabei mal nicht erhalten bleiben sollte.
+            from app.services import sidecar_service as sc
+            sd_date = sc.read_json_sidecar(file_path)
+            if sd_date is not None and sd_date.get("created_at") != created_at:
+                sd_date["created_at"] = created_at
+                sc.write_json_sidecar(file_path, sd_date)
 
         repo.update_file_status(
             db,

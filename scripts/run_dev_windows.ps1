@@ -1,7 +1,10 @@
-# JOLIA Docs – Windows Entwicklungsstart
+﻿# JOLIA Docs – Windows Entwicklungsstart
 # Dieses Skript richtet die Entwicklungsumgebung ein und startet die App.
 
 $ErrorActionPreference = "Stop"
+
+$projectRoot = Split-Path -Parent $PSScriptRoot
+Set-Location $projectRoot
 
 Write-Host "=== JOLIA Docs – Windows Entwicklungsstart ===" -ForegroundColor Cyan
 
@@ -14,6 +17,13 @@ if (-Not (Test-Path ".venv")) {
 # Aktivieren
 & ".\.venv\Scripts\Activate.ps1"
 
+function Test-PythonPackage {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    python -c "import importlib.metadata as m, sys; sys.exit(0 if any((d.metadata['Name'] or '').lower() == sys.argv[1].lower() for d in m.distributions()) else 1)" $Name
+    return $LASTEXITCODE -eq 0
+}
+
 # Abhängigkeiten nur installieren wenn requirements.txt sich geändert hat
 $reqHash = (Get-FileHash "requirements.txt" -Algorithm MD5).Hash
 $hashFile = ".venv\.req_hash"
@@ -23,7 +33,7 @@ if ($reqHash -ne $lastHash) {
     Write-Host "Installiere Abhängigkeiten..." -ForegroundColor Yellow
 
     # ── Schritt 1: PyTorch (CPU) vorinstallieren wenn torch noch fehlt ───────────
-    $torchOk = pip show torch 2>$null
+    $torchOk = Test-PythonPackage "torch"
     if (-not $torchOk) {
         Write-Host "  Installiere PyTorch (CPU-Version, ~260 MB)..." -ForegroundColor Yellow
         pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu --quiet
@@ -36,7 +46,7 @@ if ($reqHash -ne $lastHash) {
     }
 
     # ── Schritt 2: dlib (vorkompiliertes Wheel, kein cmake nötig) ────────────────
-    $dlibOk = pip show dlib 2>$null
+    $dlibOk = Test-PythonPackage "dlib"
     if (-not $dlibOk) {
         Write-Host "  Installiere dlib (vorkompiliertes Wheel)..." -ForegroundColor Yellow
         pip install "dlib==19.24.6" --quiet 2>$null
@@ -74,7 +84,7 @@ if ($reqHash -ne $lastHash) {
         # Python 3.12 bzw. neueren pip-Versionen wird das nicht mehr automatisch mitinstalliert.
         pip install setuptools --quiet
 
-        $frOk = pip show face-recognition 2>$null
+        $frOk = Test-PythonPackage "face-recognition"
         if (-not $frOk) {
             Write-Host "  Installiere face-recognition..." -ForegroundColor Yellow
             pip install face-recognition --quiet
@@ -89,7 +99,7 @@ if ($reqHash -ne $lastHash) {
 
         # face_recognition installiert face_recognition_models manchmal nicht zuverlässig
         # von PyPI (Modelldaten-Paket, kein Wheel) – explizit prüfen und via Git nachziehen.
-        $frModelsOk = pip show face_recognition_models 2>$null
+        $frModelsOk = Test-PythonPackage "face_recognition_models"
         if (-not $frModelsOk) {
             Write-Host "  Installiere face_recognition_models (Modelldaten)..." -ForegroundColor Yellow
             pip install git+https://github.com/ageitgey/face_recognition_models --quiet
@@ -104,7 +114,7 @@ if ($reqHash -ne $lastHash) {
     }
 
     # ── Schritt 4: openai-whisper ─────────────────────────────────────────────────
-    $whisperOk = pip show openai-whisper 2>$null
+    $whisperOk = Test-PythonPackage "openai-whisper"
     if (-not $whisperOk) {
         Write-Host "  Installiere openai-whisper (Audio/Video-Transkription)..." -ForegroundColor Yellow
         pip install openai-whisper --quiet
@@ -264,7 +274,8 @@ Write-Host "Prüfe Ollama..." -ForegroundColor Cyan
 $ollamaRunning = $false
 
 # ollama.exe suchen: zuerst im PATH, dann bekannte Installationsorte
-$ollamaExe = (Get-Command ollama -ErrorAction SilentlyContinue)?.Source
+$ollamaCommand = Get-Command ollama -ErrorAction SilentlyContinue
+$ollamaExe = if ($ollamaCommand) { $ollamaCommand.Source } else { $null }
 if (-not $ollamaExe) {
     $candidates = @(
         "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe",
@@ -308,7 +319,7 @@ if ($ollamaRunning -and $ollamaExe) {
     $modelsJson = Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -UseBasicParsing | ConvertFrom-Json
     $installedModels = $modelsJson.models | ForEach-Object { $_.name }
 
-    foreach ($model in @("qwen2.5:1.5b", "nomic-embed-text", "moondream")) {
+    foreach ($model in @("qwen2.5:3b", "qwen2.5:7b", "minicpm-v", "bge-m3")) {
         if ($installedModels -notcontains $model) {
             Write-Host "  Lade Modell: $model ..." -ForegroundColor Yellow
             & $ollamaExe pull $model

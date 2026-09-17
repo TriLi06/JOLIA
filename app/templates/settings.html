@@ -31,7 +31,15 @@
                     – <code>{{ cfg.models.ollama_base_url }}</code>
                 </td>
             </tr>
-            <tr><th>LLM-Modell</th><td><code>{{ cfg.models.ollama_model }}</code></td></tr>
+            <tr><th>LLM-Modell (Chat/RAG)</th><td><code>{{ cfg.models.ollama_model }}</code></td></tr>
+            <tr>
+                <th>LLM-Modell (Import)</th>
+                <td><code>{{ cfg.models.background_ollama_model }}</code> <small>für Tags und Zusammenfassungen</small></td>
+            </tr>
+            <tr>
+                <th>LLM-Modell (Import-Kategorien)</th>
+                <td><code>{{ cfg.models.categorization_ollama_model }}</code></td>
+            </tr>
             <tr><th>Embedding</th><td><code>{{ cfg.models.embedding_model }}</code></td></tr>
             <tr>
                 <th>Whisper</th>
@@ -138,6 +146,10 @@
                 Best-of-Serie-Auswahl und Gesichts-Zuordnungen werden versucht wiederherzustellen,
                 sind aber nicht garantiert.</small></p>
         </div>
+        <div>
+            <button class="outline secondary" onclick="recategorizeUncategorized()" title="Alle unkategorisierten Dateien per KI einordnen">🤖 Unkategorisierte einordnen</button>
+            <p><small>Ordnet alle bisher unkategorisierten Dateien per KI ein. Der Vorgang läuft als Hintergrundjob.</small></p>
+        </div>
         {% if cfg.processing.enable_face_detection %}
         <div>
             <button class="secondary outline" onclick="rebuildFaceClusters(this)">🔄 Gesichter neu clustern</button>
@@ -234,6 +246,20 @@ async function reindex(mode, btn) {
     } finally {
         btn.disabled = false;
         btn.textContent = originalText;
+    }
+}
+
+async function recategorizeUncategorized() {
+    if (!confirm('Alle unkategorisierten Dateien per KI einordnen? Läuft als Job im Hintergrund.')) return;
+    try {
+        const r = await fetch('/api/categories/recategorize-uncategorized', { method: 'POST' });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler');
+        if (confirm((data.message || 'Job gestartet.') + '\n\nJetzt zur Jobs-Seite wechseln?')) {
+            window.location.href = '/jobs';
+        }
+    } catch (e) {
+        alert('Fehler: ' + e.message);
     }
 }
 

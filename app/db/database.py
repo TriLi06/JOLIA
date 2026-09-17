@@ -73,6 +73,11 @@ def _migrate_schema(engine) -> None:
             ("sharpness_score", "FLOAT"),
             ("best_file_id", "VARCHAR(36)"),
             ("best_manually_set", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("category_id", "VARCHAR(36)"),
+            ("category_assigned_by", "VARCHAR(16)"),
+            ("category_needs_review", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("category_ai_response", "TEXT"),
+            ("category_review_reason", "TEXT"),
         ]
     }
     with engine.connect() as conn:

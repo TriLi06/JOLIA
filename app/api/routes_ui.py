@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_session
 from app.db import repositories as repo
 from app.config import get_config
-from app.services import archive_service
+from app.services import archive_service, category_service
 
 router = APIRouter()
 
@@ -46,6 +46,11 @@ def files_page(request: Request, db: Session = Depends(get_session)):
     return templates.TemplateResponse(
         request, "files.html", {"total": total}
     )
+
+
+@router.get("/categories", response_class=HTMLResponse)
+def categories_page(request: Request):
+    return templates.TemplateResponse(request, "categories.html")
 
 
 @router.get("/files/{file_id}", response_class=HTMLResponse)
@@ -127,7 +132,7 @@ def jobs_page(request: Request, db: Session = Depends(get_session)):
 
 @router.get("/review", response_class=HTMLResponse)
 def review_queue(request: Request, db: Session = Depends(get_session)):
-    items, total = repo.list_files(db, status="needs_review", limit=200)
+    items, total = repo.list_review_files(db, limit=200)
     # OCR-Konfidenz aus Sidecar-JSON lesen
     from app.services import sidecar_service
     files_with_conf = []
@@ -182,6 +187,7 @@ def review_file(request: Request, file_id: str, db: Session = Depends(get_sessio
             "ocr_confidence": ocr_confidence,
             "current_text": current_text,
             "original_ocr_text": original_ocr_text,
+            "categories": category_service.list_category_tree(db),
         },
     )
 

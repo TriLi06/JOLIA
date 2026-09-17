@@ -6,7 +6,7 @@
 # Dateien zum Verarbeiten in den Ordner "jolia/inbox" neben dieser Datei legen.
 #
 # Es ist KEINE manuelle Konfiguration nötig. Beim ersten Start werden
-# automatisch das Ollama-LLM (qwen2.5:3b) und das Embedding-Modell geladen
+# automatisch die Ollama-Modelle für Chat und Import geladen
 # (einmaliger Download, danach lokal gecacht).
 #
 # Optional: eigene Ordner verwenden (Windows- und Linux-Pfade sind erlaubt).
@@ -39,7 +39,8 @@ services:
       retries: 18
     restart: unless-stopped
 
-  # Einmaliger Job: lädt das Standard-LLM, bevor die App startet
+  # Einmaliger Job: lädt die Modelle auf Disk, bevor die App startet.
+  # Das eigentliche Laden in RAM/VRAM erfolgt erst beim ersten API-Aufruf.
   ollama-init:
     image: ollama/ollama:latest
     container_name: jolia-ollama-init
@@ -48,7 +49,7 @@ services:
         condition: service_healthy
     environment:
       - OLLAMA_HOST=ollama:11434
-    entrypoint: ["/bin/sh", "-c", "ollama pull qwen2.5:3b"]
+    entrypoint: ["/bin/sh", "-c", "ollama pull qwen2.5:3b && ollama pull qwen2.5:7b && ollama pull minicpm-v && ollama pull bge-m3"]
     restart: "no"
 
   # Die eigentliche JOLIA Docs-Anwendung

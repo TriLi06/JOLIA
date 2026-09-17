@@ -22,6 +22,7 @@ class FileResponse(BaseModel):
     mime_type: str | None
     content_type: str | None
     tags: list[str] = []
+    albums: list[str] = []
     file_size: int | None
     status: str
     imported_at: str
@@ -32,6 +33,11 @@ class FileResponse(BaseModel):
     thumbnail_path: str | None = None
     sharpness_score: float | None = None
     best_file_id: str | None = None
+    category_id: str | None = None
+    category_path: str | None = None
+    category_needs_review: bool = False
+    category_ai_response: str | None = None
+    category_review_reason: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -47,6 +53,7 @@ class FileListResponse(BaseModel):
 def list_files(
     content_type: str | None = None,
     tags: list[str] | None = Query(None),
+    albums: list[str] | None = Query(None),
     status: str | None = None,
     q: str | None = None,
     date_from: str | None = None,
@@ -57,12 +64,12 @@ def list_files(
 ):
     if q or date_from or date_to:
         items, total = repo.search_files(
-            db, q_text=q, content_type=content_type, tags=tags, status=status,
+            db, q_text=q, content_type=content_type, tags=tags, albums=albums, status=status,
             date_from=date_from, date_to=date_to, limit=limit, offset=offset,
         )
     else:
         items, total = repo.list_files(
-            db, content_type=content_type, tags=tags, status=status,
+            db, content_type=content_type, tags=tags, albums=albums, status=status,
             limit=limit, offset=offset,
         )
     return FileListResponse(
@@ -77,6 +84,7 @@ def list_files(
 def list_files_timeline(
     content_type: str | None = None,
     tags: list[str] | None = Query(None),
+    albums: list[str] | None = Query(None),
     status: str | None = None,
     q: str | None = None,
     date_from: str | None = None,
@@ -85,7 +93,7 @@ def list_files_timeline(
 ):
     """Liefert Dateien nach Kalendertag gruppiert (Aufnahme-/Importdatum) fuer die Timeline-Ansicht."""
     items = repo.list_files_by_day(
-        db, q_text=q, content_type=content_type, tags=tags, status=status,
+        db, q_text=q, content_type=content_type, tags=tags, albums=albums, status=status,
         date_from=date_from, date_to=date_to,
     )
     days: dict[str, list] = {}
@@ -101,6 +109,7 @@ def list_files_timeline(
 def list_files_timeline_days(
     content_type: str | None = None,
     tags: list[str] | None = Query(None),
+    albums: list[str] | None = Query(None),
     status: str | None = None,
     q: str | None = None,
     date_from: str | None = None,
@@ -109,7 +118,7 @@ def list_files_timeline_days(
 ):
     """Liefert nur die Kalendertage mit Anzahl (guenstig) - Basis fuer das lazy-ladende Timeline-Scrolling."""
     days = repo.count_files_by_day(
-        db, q_text=q, content_type=content_type, tags=tags, status=status,
+        db, q_text=q, content_type=content_type, tags=tags, albums=albums, status=status,
         date_from=date_from, date_to=date_to,
     )
     total = sum(d["count"] for d in days)
@@ -121,6 +130,7 @@ def list_files_timeline_day(
     date: str = Query(...),
     content_type: str | None = None,
     tags: list[str] | None = Query(None),
+    albums: list[str] | None = Query(None),
     status: str | None = None,
     q: str | None = None,
     date_from: str | None = None,
@@ -129,7 +139,7 @@ def list_files_timeline_day(
 ):
     """Liefert die Dateien eines einzelnen Kalendertags - wird beim Timeline-Scrollen bedarfsgesteuert geladen."""
     items = repo.list_files_for_day(
-        db, date, q_text=q, content_type=content_type, tags=tags, status=status,
+        db, date, q_text=q, content_type=content_type, tags=tags, albums=albums, status=status,
         date_from=date_from, date_to=date_to,
     )
     return {
@@ -247,6 +257,9 @@ def mark_reviewed(
     if not f:
         raise HTTPException(status_code=404, detail="Datei nicht gefunden")
     repo.update_file_status(db, file_id, "processed")
+    f.category_needs_review = False
+    f.category_review_reason = None
+    db.commit()
     return {"message": "Datei als verarbeitet markiert.", "file_id": file_id}
 
 
@@ -260,6 +273,9 @@ def mark_reviewed(
     if not f:
         raise HTTPException(status_code=404, detail="Datei nicht gefunden")
     repo.update_file_status(db, file_id, "processed")
+    f.category_needs_review = False
+    f.category_review_reason = None
+    db.commit()
     return {"message": "Datei als verarbeitet markiert.", "file_id": file_id}
 
 
@@ -386,6 +402,69 @@ def remove_file_tag(file_id: str, name: str, db: Session = Depends(get_session))
     from app.services import tag_service
     tag_service.unassign_tag(db, file_id, name)
     return {"message": "Tag entfernt.", "file_id": file_id, "name": name}
+
+
+class FileAlbumCreate(BaseModel):
+    album_id: str
+
+
+@router.get("/{file_id}/albums")
+def get_file_albums(file_id: str, db: Session = Depends(get_session)):
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    from app.services import album_service
+    return {"items": album_service.get_file_albums(db, file_id)}
+
+
+@router.post("/{file_id}/albums")
+def add_file_album(file_id: str, payload: FileAlbumCreate, db: Session = Depends(get_session)):
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    from app.services import album_service
+    try:
+        album = album_service.assign_album(db, file_id, payload.album_id, added_by="user")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"message": "Album hinzugefügt.", "file_id": file_id, **album}
+
+
+@router.delete("/{file_id}/albums/{album_id}")
+def remove_file_album(file_id: str, album_id: str, db: Session = Depends(get_session)):
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    from app.services import album_service
+    album_service.unassign_album(db, file_id, album_id)
+    return {"message": "Album entfernt.", "file_id": file_id, "album_id": album_id}
+
+
+class FileCategoryAssign(BaseModel):
+    category_id: str | None = None
+
+
+@router.post("/{file_id}/category")
+def set_file_category(file_id: str, payload: FileCategoryAssign, db: Session = Depends(get_session)):
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    from app.services import category_service
+    try:
+        category_service.assign_category_manually(db, file_id, payload.category_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"message": "Kategorie zugewiesen.", "file_id": file_id}
+
+
+@router.delete("/{file_id}/category")
+def remove_file_category(file_id: str, db: Session = Depends(get_session)):
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    from app.services import category_service
+    category_service.assign_category_manually(db, file_id, None)
+    return {"message": "Kategorie entfernt.", "file_id": file_id}
 
 
 @router.get("/{file_id}/thumbnail")

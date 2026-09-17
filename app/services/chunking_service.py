@@ -81,6 +81,28 @@ def split_text(
     return chunks
 
 
+def sample_chunk_texts(texts: list[str], max_chars: int = 6000, max_samples: int = 12) -> str:
+    """Baut einen repräsentativen Kontext-Text aus vielen Chunks statt nur dem ersten.
+
+    Bei kurzen Dokumenten werden alle Chunks verwendet. Bei sehr langen Dokumenten
+    werden Chunks gleichmäßig über Anfang, Mitte und Ende verteilt ausgewählt
+    (statt nur die ersten N), damit KI-Zusammenfassung/Kategorisierung auch bei
+    langen Texten den gesamten Inhalt berücksichtigen, ohne dass der Prompt
+    beliebig groß wird. Die Indexierung/Embeddings sind davon nicht betroffen,
+    da dafür weiterhin alle Chunks einzeln verwendet werden.
+    """
+    non_empty = [t for t in texts if t and t.strip()]
+    if not non_empty:
+        return ""
+    if len(non_empty) <= max_samples:
+        selected = non_empty
+    else:
+        step = (len(non_empty) - 1) / (max_samples - 1)
+        indices = sorted({round(i * step) for i in range(max_samples)})
+        selected = [non_empty[i] for i in indices]
+    return "\n\n".join(selected)[:max_chars]
+
+
 def _split_long_paragraph(para: str, chunk_size: int, overlap: int) -> list[str]:
     """Zerlegt einen überlangen Paragraphen an Satzgrenzen (Fallback: Wortgrenzen)."""
     pieces: list[str] = []

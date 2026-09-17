@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from app.services import model_lifecycle
+
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 
@@ -10,6 +12,26 @@ logger = logging.getLogger(__name__)
 
 _model: "SentenceTransformer | None" = None
 _model_name: str = ""
+
+_LIFECYCLE_NAME = "embedding_model"
+
+
+def _unload_embedding_model() -> None:
+    global _model, _model_name
+    _model = None
+    _model_name = ""
+    model_lifecycle.gc_cleanup()
+
+
+model_lifecycle.register(_LIFECYCLE_NAME, _unload_embedding_model)
+
+
+def _idle_unload_minutes() -> float:
+    try:
+        from app.config import get_config
+        return get_config().models.model_idle_unload_minutes
+    except Exception:
+        return 10.0
 
 
 def init_embedding_model(model_name: str, device: str = "auto") -> None:
@@ -53,6 +75,7 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
         init_embedding_model(cfg.models.embedding_model, cfg.models.embedding_device)
     assert _model is not None
     vectors = _model.encode(texts, batch_size=32, show_progress_bar=False)
+    model_lifecycle.touch(_LIFECYCLE_NAME, _idle_unload_minutes())
     return [v.tolist() for v in vectors]
 
 

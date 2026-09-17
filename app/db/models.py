@@ -43,6 +43,15 @@ class File(Base):
         String(36), ForeignKey("files.id"), index=True
     )  # zeigt auf beste Aufnahme der Serie; None = ist selbst die beste bzw. keiner Serie zugeordnet
     best_manually_set: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # User hat Best-Auswahl ueberschrieben
+    category_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("categories.id", ondelete="SET NULL"), index=True
+    )  # genau eine Kategorie (Blattknoten) je Datei, z.B. "Dokumente > Rechnungen > Auto"
+    category_assigned_by: Mapped[str | None] = mapped_column(String(16))  # "user" | "ai"
+    category_needs_review: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )  # KI war sich bei der Kategorie nicht sicher genug, um selbst eine zu vergeben
+    category_ai_response: Mapped[str | None] = mapped_column(Text)
+    category_review_reason: Mapped[str | None] = mapped_column(Text)
 
     chunks: Mapped[list[Chunk]] = relationship(
         "Chunk", back_populates="file", cascade="all, delete-orphan"
@@ -53,11 +62,27 @@ class File(Base):
     tag_links: Mapped[list["FileTagLink"]] = relationship(
         "FileTagLink", back_populates="file", cascade="all, delete-orphan"
     )
+    album_links: Mapped[list["FileAlbumLink"]] = relationship(
+        "FileAlbumLink", back_populates="file", cascade="all, delete-orphan"
+    )
+    category: Mapped["Category | None"] = relationship("Category", foreign_keys=[category_id])
 
     @property
     def tags(self) -> list[str]:
         """Sortierte Liste der Tag-Namen dieser Datei (ueber file_tags-Verknuepfungstabelle)."""
         return sorted(link.tag.name for link in self.tag_links)
+
+    @property
+    def albums(self) -> list[str]:
+        """Sortierte Liste der Album-Namen dieser Datei (ueber file_albums-Verknuepfungstabelle)."""
+        return sorted(link.album.name for link in self.album_links)
+
+    @property
+    def category_path(self) -> str | None:
+        """Breadcrumb-Pfad der Kategorie dieser Datei, z.B. 'Dokumente > Rechnungen > Auto'."""
+        if not self.category:
+            return None
+        return self.category.path()
 
 
 class Chunk(Base):
@@ -144,6 +169,73 @@ class FileTagLink(Base):
 
     file: Mapped[File] = relationship("File", back_populates="tag_links")
     tag: Mapped[Tag] = relationship("Tag", back_populates="file_links")
+
+
+class Album(Base):
+    """Nutzerdefiniertes Album (spezieller Tag mit optionaler Beschreibung), z.B. 'Urlaub 2025'."""
+    __tablename__ = "albums"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
+    created_at: Mapped[str] = mapped_column(String(32), nullable=False, default=_now_iso)
+
+    file_links: Mapped[list["FileAlbumLink"]] = relationship(
+        "FileAlbumLink", back_populates="album", cascade="all, delete-orphan"
+    )
+
+
+class FileAlbumLink(Base):
+    """Verknuepfung zwischen einer Datei und einem Album (many-to-many)."""
+    __tablename__ = "file_albums"
+
+    file_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("files.id", ondelete="CASCADE"), primary_key=True
+    )
+    album_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("albums.id", ondelete="CASCADE"), primary_key=True
+    )
+    added_by: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
+    created_at: Mapped[str] = mapped_column(String(32), nullable=False, default=_now_iso)
+
+    file: Mapped[File] = relationship("File", back_populates="album_links")
+    album: Mapped[Album] = relationship("Album", back_populates="file_links")
+
+
+class Category(Base):
+    """Hierarchischer Kategorie-Knoten (Baum), z.B. Dokumente > Rechnungen > Auto > Astra > Wartung.
+
+    Jede Datei haengt an genau einem Knoten (File.category_id), nicht an einer
+    Verknuepfungstabelle - anders als die flachen Tags/Alben.
+    """
+    __tablename__ = "categories"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    parent_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("categories.id", ondelete="CASCADE"), index=True
+    )
+    created_by: Mapped[str] = mapped_column(String(16), nullable=False, default="user")  # "user" | "ai"
+    created_at: Mapped[str] = mapped_column(String(32), nullable=False, default=_now_iso)
+
+    parent: Mapped["Category | None"] = relationship(
+        "Category", remote_side=[id], back_populates="children"
+    )
+    children: Mapped[list["Category"]] = relationship(
+        "Category", back_populates="parent", cascade="all, delete-orphan"
+    )
+
+    def path(self) -> str:
+        """Breadcrumb-Pfad von der Wurzel bis zu diesem Knoten, z.B. 'Dokumente > Rechnungen > Auto'."""
+        segments = [self.name]
+        node = self.parent
+        while node is not None:
+            segments.append(node.name)
+            node = node.parent
+        return " > ".join(reversed(segments))
+
+
 
 
 # ---------------------------------------------------------------------------

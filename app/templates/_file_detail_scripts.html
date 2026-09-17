@@ -1,6 +1,15 @@
 <script>
 var FILE_ID = '{{ file.id }}';
 
+// Vorschaubereich (Bild/KI-Zusammenfassung) oeffnet fuer darstellbare Dateitypen die Vollbild-Ansicht.
+(function initFilePreviewTrigger() {
+    const el = document.getElementById('file-preview-trigger');
+    if (!el || typeof isPreviewableMime !== 'function' || typeof openFullscreenViewer !== 'function') return;
+    if (!isPreviewableMime(el.dataset.mime)) return;
+    el.classList.add('clickable-preview');
+    el.addEventListener('click', () => openFullscreenViewer(el.dataset.fileId));
+})();
+
 async function loadFileTags() {
     const badges = document.getElementById('tags-badges');
     const datalist = document.getElementById('tag-datalist');
@@ -79,6 +88,146 @@ async function removeFileTag(name) {
 }
 
 loadFileTags();
+
+async function loadFileCategory() {
+    const current = document.getElementById('category-current');
+    const select = document.getElementById('category-select-input');
+    if (!current || !select) return;
+    try {
+        const [fileRes, categoriesRes] = await Promise.all([
+            fetch(`/api/files/${FILE_ID}`),
+            fetch('/api/categories'),
+        ]);
+        const file = await fileRes.json();
+        const categoriesData = await categoriesRes.json();
+        const categories = categoriesData.items || [];
+        const byId = Object.fromEntries(categories.map(c => [c.id, c]));
+        function pathOf(id) {
+            const segments = [];
+            let node = byId[id];
+            while (node) { segments.unshift(node.name); node = node.parent_id ? byId[node.parent_id] : null; }
+            return segments.join(' > ');
+        }
+        if (file.category_id) {
+            const reviewBadge = file.category_needs_review ? ' <span class="status-badge status-needs_review">Review nötig</span>' : '';
+            current.innerHTML = `<span class="tag-badge">${escapeHtml(file.category_path || pathOf(file.category_id))}
+                <button type="button" onclick="removeFileCategory()" title="Kategorie entfernen">×</button></span>${reviewBadge}`;
+        } else {
+            const reviewBadge = file.category_needs_review ? ' <span class="status-badge status-needs_review">Review nötig</span>' : '';
+            current.innerHTML = `<small>Noch keiner Kategorie zugeordnet.</small>${reviewBadge}`;
+        }
+        const sortedPaths = categories.map(c => ({ id: c.id, path: pathOf(c.id) })).sort((a, b) => a.path.localeCompare(b.path));
+        select.innerHTML = '<option value="">Kategorie wählen…</option>'
+            + sortedPaths.map(c => `<option value="${escapeHtml(c.id)}" ${c.id === file.category_id ? 'selected' : ''}>${escapeHtml(c.path)}</option>`).join('');
+    } catch (e) {
+        console.warn('Kategorie konnte nicht geladen werden', e);
+    }
+}
+
+async function setFileCategoryFromSelect(fileId) {
+    const select = document.getElementById('category-select-input');
+    const categoryId = select.value || null;
+    const result = document.getElementById('category-result');
+    try {
+        const r = await fetch(`/api/files/${fileId}/category`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category_id: categoryId })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler');
+        await loadFileCategory();
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+async function removeFileCategory() {
+    const result = document.getElementById('category-result');
+    try {
+        const r = await fetch(`/api/files/${FILE_ID}/category`, { method: 'DELETE' });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler');
+        await loadFileCategory();
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+loadFileCategory();
+
+async function loadFileAlbums() {
+    const badges = document.getElementById('albums-badges');
+    const select = document.getElementById('album-select-input');
+    if (!badges) return;
+    try {
+        const [albumsRes, allAlbumsRes] = await Promise.all([
+            fetch(`/api/files/${FILE_ID}/albums`),
+            fetch('/api/albums'),
+        ]);
+        const albumsData = await albumsRes.json();
+        const allAlbumsData = await allAlbumsRes.json();
+        const fileAlbums = albumsData.items || [];
+        renderAlbumBadges(fileAlbums);
+        if (select) {
+            const assignedIds = fileAlbums.map(a => a.id);
+            const options = (allAlbumsData.items || []).filter(a => !assignedIds.includes(a.id));
+            select.innerHTML = '<option value="">Album wählen…</option>'
+                + options.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}</option>`).join('');
+        }
+    } catch (e) {
+        console.warn('Alben konnten nicht geladen werden', e);
+    }
+}
+
+function renderAlbumBadges(albums) {
+    const badges = document.getElementById('albums-badges');
+    if (!badges) return;
+    badges.innerHTML = albums.length
+        ? albums.map(a => `
+            <span class="album-badge">${escapeHtml(a.name)}
+                <button type="button" onclick="removeFileAlbum('${escapeHtml(a.id)}')" title="Aus Album entfernen">×</button>
+            </span>`).join('')
+        : '<small>Noch in keinem Album.</small>';
+}
+
+async function addAlbumFromInput(fileId) {
+    const select = document.getElementById('album-select-input');
+    const albumId = select.value;
+    if (!albumId) return;
+    const result = document.getElementById('albums-result');
+    select.setAttribute('aria-busy', 'true');
+    select.disabled = true;
+    try {
+        const r = await fetch(`/api/files/${fileId}/albums`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ album_id: albumId })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler');
+        await loadFileAlbums();
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    } finally {
+        select.removeAttribute('aria-busy');
+        select.disabled = false;
+    }
+}
+
+async function removeFileAlbum(albumId) {
+    const result = document.getElementById('albums-result');
+    try {
+        const r = await fetch(`/api/files/${FILE_ID}/albums/${encodeURIComponent(albumId)}`, { method: 'DELETE' });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler');
+        await loadFileAlbums();
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+loadFileAlbums();
 
 async function reprocessFile(fileId) {
     await fetch(`/api/files/${fileId}/reprocess`, { method: 'POST' });

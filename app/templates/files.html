@@ -44,7 +44,12 @@
             </div>
             <div class="filter-field">
                 <label>Tags</label>
-                <div id="tag-select" class="tag-select"></div>
+                <div id="tag-select" class="token-select"></div>
+            </div>
+            <div class="filter-field">
+                <label>Album</label>
+                <div id="album-select" class="token-select"></div>
+                <a href="#" class="album-manage-link" onclick="openAlbumPanel(); return false;">Alben verwalten</a>
             </div>
             <div class="filter-field">
                 <label for="filter-date-from">Von</label>
@@ -58,6 +63,37 @@
                 <button class="outline secondary" id="reset-filters-btn" onclick="resetFilters()">✕ Zurücksetzen</button>
             </div>
         </aside>
+
+        <aside class="album-sidebar album-collapsed" id="album-sidebar">
+            <h2>Alben</h2>
+            <div class="filter-field">
+                <label for="album-new-name">Name</label>
+                <input type="text" id="album-new-name" placeholder="z.B. Urlaub 2025" oninput="onAlbumFieldsInput()">
+            </div>
+            <div class="filter-field">
+                <label for="album-new-description">Beschreibung (optional)</label>
+                <input type="text" id="album-new-description" placeholder="Kurze Beschreibung…" oninput="onAlbumFieldsInput()">
+            </div>
+            <div class="context-actions" id="album-edit-actions">
+                <button id="album-save-btn" onclick="saveAlbumEdit()" title="Änderungen speichern" style="display:none">💾 Speichern</button>
+                <button id="album-cancel-btn" class="outline secondary" onclick="cancelAlbumEdit()" title="Bearbeitung abbrechen" style="display:none">Abbrechen</button>
+                <button id="album-delete-btn" class="outline secondary" onclick="deleteSelectedAlbum()" title="Album löschen" disabled>🗑 Album löschen</button>
+            </div>
+            <div id="album-create-result"></div>
+
+            <div id="album-list" class="album-list"><small>Lädt…</small></div>
+
+            <div class="context-actions">
+                <button onclick="createAlbum()" title="Album anlegen">➕ Anlegen</button>
+            </div>
+
+            <p><small>Mit „+“/„−“ werden alle aktuell gefilterten Dateien dem oben ausgewählten Album hinzugefügt bzw. daraus entfernt.</small></p>
+            <div class="album-bulk-actions">
+                <button class="outline" onclick="bulkAlbumAction('add')" title="Gefilterte Dateien zum ausgewählten Album hinzufügen">+</button>
+                <button class="outline secondary" onclick="bulkAlbumAction('remove')" title="Gefilterte Dateien aus ausgewähltem Album entfernen">−</button>
+            </div>
+        </aside>
+
 
         <div class="files-main">
             <div id="list-view" style="display:none">
@@ -98,6 +134,42 @@ function debouncedReload() {
     reloadTimer = setTimeout(reloadFiles, 350);
 }
 
+/* Persistenz der Filterwerte über Seitenwechsel/Neuladen hinweg (localStorage,
+   da Filter rein clientseitiger UI-Zustand sind und nicht an den Server müssen) */
+const FILTERS_STORAGE_KEY = 'filesFilters';
+
+function saveFiltersToStorage(params) {
+    try {
+        localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify({
+            q: params.get('q') || '',
+            status: params.get('status') || '',
+            content_type: params.get('content_type') || '',
+            tags: params.getAll('tags'),
+            albums: params.getAll('albums'),
+            date_from: params.get('date_from') || '',
+            date_to: params.get('date_to') || '',
+        }));
+    } catch (e) {
+        // z.B. Private-Modus ohne localStorage-Zugriff - Filter bleiben dann nur für die Session erhalten
+    }
+}
+
+function loadStoredFilters() {
+    try {
+        return JSON.parse(localStorage.getItem(FILTERS_STORAGE_KEY) || 'null');
+    } catch (e) {
+        return null;
+    }
+}
+
+function clearStoredFilters() {
+    try {
+        localStorage.removeItem(FILTERS_STORAGE_KEY);
+    } catch (e) {
+        // ignorieren
+    }
+}
+
 function resetFilters() {
     document.getElementById('filter-q').value = '';
     document.getElementById('filter-status').value = '';
@@ -105,6 +177,8 @@ function resetFilters() {
     document.getElementById('filter-date-from').value = '';
     document.getElementById('filter-date-to').value = '';
     TagSelect.setSelected([]);
+    AlbumSelect.setSelected([]);
+    clearStoredFilters();
     reloadFiles();
 }
 
@@ -114,20 +188,24 @@ function buildFilterParams() {
     const status = document.getElementById('filter-status').value;
     const type = document.getElementById('filter-type').value;
     const tags = TagSelect.getSelected();
+    const albums = AlbumSelect.getSelected();
     const dateFrom = document.getElementById('filter-date-from').value;
     const dateTo = document.getElementById('filter-date-to').value;
     if (q) params.set('q', q);
     if (status) params.set('status', status);
     if (type) params.set('content_type', type);
     tags.forEach(t => params.append('tags', t));
+    albums.forEach(a => params.append('albums', a));
     if (dateFrom) params.set('date_from', dateFrom);
     if (dateTo) params.set('date_to', dateTo);
+    saveFiltersToStorage(params);
     return params;
 }
 
-/* Jira-artige Tag-Mehrfachauswahl: gewählte Tags als Badges in einer Zeile,
-   Dropdown-Suche zum Hinzufügen, ✕ zum Entfernen. */
-const TagSelect = (function () {
+/* Jira-artige Mehrfachauswahl: gewählte Werte als Badges in einer Zeile,
+   Dropdown-Suche zum Hinzufügen, ✕ zum Entfernen. Wird für Tags UND Alben genutzt
+   (tokenClass steuert nur die Badge-Farbe per CSS). */
+function createTokenSelect(tokenClass, placeholder, emptyLabel) {
     let root, control, inputEl, dropdown = null;
     let all = [];        // [{name, count}]
     let selected = [];   // [name]
@@ -137,9 +215,9 @@ const TagSelect = (function () {
     function init(el, opts) {
         root = el;
         onChange = (opts && opts.onChange) || onChange;
-        root.innerHTML = '<div class="tag-select-control"><input class="tag-select-input" placeholder="Tags…" autocomplete="off"></div>';
-        control = root.querySelector('.tag-select-control');
-        inputEl = root.querySelector('.tag-select-input');
+        root.innerHTML = `<div class="token-select-control"><input class="token-select-input" placeholder="${placeholder}" autocomplete="off"></div>`;
+        control = root.querySelector('.token-select-control');
+        inputEl = root.querySelector('.token-select-input');
         control.addEventListener('click', () => inputEl.focus());
         inputEl.addEventListener('focus', () => { control.classList.add('focused'); openDropdown(); });
         inputEl.addEventListener('input', () => { activeIdx = -1; openDropdown(); });
@@ -155,10 +233,10 @@ const TagSelect = (function () {
     }
     function remove(name) { selected = selected.filter(n => n !== name); render(); onChange(); }
     function render() {
-        control.querySelectorAll('.tag-token').forEach(t => t.remove());
+        control.querySelectorAll('.' + tokenClass).forEach(t => t.remove());
         selected.forEach(name => {
             const token = document.createElement('span');
-            token.className = 'tag-token';
+            token.className = tokenClass;
             token.innerHTML = escapeHtml(name) + '<button type="button" tabindex="-1" aria-label="Entfernen">✕</button>';
             token.querySelector('button').addEventListener('click', (e) => { e.stopPropagation(); remove(name); });
             control.insertBefore(token, inputEl);
@@ -172,14 +250,14 @@ const TagSelect = (function () {
         const opts = filteredOptions();
         if (dropdown) dropdown.remove();
         dropdown = document.createElement('div');
-        dropdown.className = 'tag-select-dropdown';
+        dropdown.className = 'token-select-dropdown';
         if (!opts.length) {
-            dropdown.innerHTML = '<div class="tag-select-empty">Keine passenden Tags</div>';
+            dropdown.innerHTML = `<div class="token-select-empty">${emptyLabel}</div>`;
         } else {
             dropdown.innerHTML = opts.map((o, i) =>
-                `<div class="tag-select-option${i === activeIdx ? ' active' : ''}" data-name="${escapeHtml(o.name)}"><span>${escapeHtml(o.name)}</span><span class="count">${o.count}</span></div>`
+                `<div class="token-select-option${i === activeIdx ? ' active' : ''}" data-name="${escapeHtml(o.name)}"><span>${escapeHtml(o.name)}</span><span class="count">${o.count}</span></div>`
             ).join('');
-            dropdown.querySelectorAll('.tag-select-option').forEach(el => {
+            dropdown.querySelectorAll('.token-select-option').forEach(el => {
                 el.addEventListener('mousedown', (e) => { e.preventDefault(); add(el.dataset.name); openDropdown(); });
             });
         }
@@ -199,17 +277,205 @@ const TagSelect = (function () {
         else if (e.key === 'Escape') { closeDropdown(); inputEl.blur(); }
     }
     return { init, setOptions, setSelected, getSelected };
-})();
+}
+const TagSelect = createTokenSelect('tag-token', 'Tags…', 'Keine passenden Tags');
+const AlbumSelect = createTokenSelect('album-token', 'Album…', 'Keine passenden Alben');
 
 async function loadTagFilterOptions() {
     try {
         const r = await fetch('/api/tags');
         const data = await r.json();
         TagSelect.setOptions((data.items || []).map(t => ({ name: t.name, count: t.count })));
-        const preselected = new URLSearchParams(window.location.search).getAll('tags');
-        if (preselected.length) TagSelect.setSelected(preselected);
+        const urlParams = new URLSearchParams(window.location.search);
+        const preselected = urlParams.getAll('tags');
+        if (preselected.length) {
+            TagSelect.setSelected(preselected);
+        } else if (!urlParams.toString() && storedFilters && storedFilters.tags && storedFilters.tags.length) {
+            TagSelect.setSelected(storedFilters.tags);
+        }
     } catch (e) {
         console.warn('Tags konnten nicht geladen werden', e);
+    }
+}
+
+let albumsCache = [];   // [{id, name, description, count}]
+let selectedAlbumId = null;
+
+async function loadAlbumFilterOptions() {
+    try {
+        const r = await fetch('/api/albums');
+        const data = await r.json();
+        albumsCache = data.items || [];
+        AlbumSelect.setOptions(albumsCache.map(a => ({ name: a.name, count: a.count })));
+        const urlParams = new URLSearchParams(window.location.search);
+        const preselected = urlParams.getAll('albums');
+        if (preselected.length) {
+            AlbumSelect.setSelected(preselected);
+        } else if (!urlParams.toString() && storedFilters && storedFilters.albums && storedFilters.albums.length) {
+            AlbumSelect.setSelected(storedFilters.albums);
+        }
+        renderAlbumList();
+    } catch (e) {
+        console.warn('Alben konnten nicht geladen werden', e);
+    }
+}
+
+function renderAlbumList() {
+    const list = document.getElementById('album-list');
+    if (!list) return;
+    if (!albumsCache.length) {
+        list.innerHTML = '<small>Noch keine Alben angelegt.</small>';
+        selectedAlbumId = null;
+        selectAlbumForEdit(null);
+        return;
+    }
+    if (!albumsCache.some(a => a.id === selectedAlbumId)) {
+        selectedAlbumId = albumsCache[0].id;
+    }
+    list.innerHTML = albumsCache.map(a => `
+        <label class="album-list-item">
+            <input type="radio" name="album-radio" value="${a.id}" ${a.id === selectedAlbumId ? 'checked' : ''} onchange="selectAlbumForEdit('${a.id}')">
+            <span>
+                <span class="album-list-name">${escapeHtml(a.name)}</span>
+                <span class="album-list-count">(${a.count})</span>
+                ${a.description ? `<span class="album-list-desc">${escapeHtml(a.description)}</span>` : ''}
+            </span>
+        </label>`).join('');
+    selectAlbumForEdit(selectedAlbumId);
+}
+
+let albumEditOriginalName = '';
+let albumEditOriginalDescription = '';
+
+function selectAlbumForEdit(albumId) {
+    selectedAlbumId = albumId;
+    const album = albumsCache.find(a => a.id === albumId);
+    albumEditOriginalName = album ? album.name : '';
+    albumEditOriginalDescription = album ? (album.description || '') : '';
+    document.getElementById('album-new-name').value = albumEditOriginalName;
+    document.getElementById('album-new-description').value = albumEditOriginalDescription;
+    document.getElementById('album-delete-btn').disabled = !album;
+    document.getElementById('album-create-result').innerHTML = '';
+    updateAlbumEditButtonsVisibility();
+}
+
+function onAlbumFieldsInput() {
+    updateAlbumEditButtonsVisibility();
+}
+
+function updateAlbumEditButtonsVisibility() {
+    const name = document.getElementById('album-new-name').value.trim();
+    const description = document.getElementById('album-new-description').value.trim();
+    const dirty = !!selectedAlbumId && (name !== albumEditOriginalName || description !== albumEditOriginalDescription);
+    document.getElementById('album-save-btn').style.display = dirty ? '' : 'none';
+    document.getElementById('album-cancel-btn').style.display = dirty ? '' : 'none';
+}
+
+function cancelAlbumEdit() {
+    document.getElementById('album-new-name').value = albumEditOriginalName;
+    document.getElementById('album-new-description').value = albumEditOriginalDescription;
+    updateAlbumEditButtonsVisibility();
+}
+
+async function deleteSelectedAlbum() {
+    if (!selectedAlbumId) return;
+    const album = albumsCache.find(a => a.id === selectedAlbumId);
+    if (!confirm(`Möchten Sie das Album "${album ? album.name : ''}" wirklich löschen? Es wird dabei von allen Dateien entfernt.`)) return;
+    const result = document.getElementById('album-create-result');
+    try {
+        const r = await fetch(`/api/albums/${selectedAlbumId}`, { method: 'DELETE' });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler');
+        selectedAlbumId = null;
+        result.innerHTML = '';
+        await loadAlbumFilterOptions();
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+async function saveAlbumEdit() {
+    if (!selectedAlbumId) return;
+    const nameInput = document.getElementById('album-new-name');
+    const descInput = document.getElementById('album-new-description');
+    const result = document.getElementById('album-create-result');
+    const name = nameInput.value.trim();
+    if (!name) return;
+    try {
+        const r = await fetch(`/api/albums/${selectedAlbumId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description: descInput.value.trim() || null }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler');
+        result.innerHTML = '';
+        await loadAlbumFilterOptions();
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+function toggleAlbumPanel() {
+    const panel = document.getElementById('album-sidebar');
+    panel.classList.toggle('album-collapsed');
+}
+
+function openAlbumPanel() {
+    document.getElementById('album-sidebar').classList.remove('album-collapsed');
+}
+
+async function createAlbum() {
+    const nameInput = document.getElementById('album-new-name');
+    const descInput = document.getElementById('album-new-description');
+    const result = document.getElementById('album-create-result');
+    const name = nameInput.value.trim();
+    if (!name) return;
+    try {
+        const r = await fetch('/api/albums', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description: descInput.value.trim() || null }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler');
+        cancelAlbumEdit();
+        result.innerHTML = '';
+        await loadAlbumFilterOptions();
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ ${e.message}</p>`;
+    }
+}
+
+async function bulkAlbumAction(action) {
+    if (!selectedAlbumId) { alert('Bitte zuerst ein Album auswählen.'); return; }
+    const album = albumsCache.find(a => a.id === selectedAlbumId);
+    const verb = action === 'add' ? 'hinzufügen' : 'entfernen';
+    const preposition = action === 'add' ? 'zum' : 'aus dem';
+    if (!confirm(`Möchten Sie alle aktuell gefilterten Dateien wirklich ${preposition} Album "${album ? album.name : ''}" ${verb}?`)) return;
+    const params = buildFilterParams();
+    const payload = {
+        content_type: params.get('content_type') || null,
+        status: params.get('status') || null,
+        q: params.get('q') || null,
+        date_from: params.get('date_from') || null,
+        date_to: params.get('date_to') || null,
+        tags: params.getAll('tags'),
+        albums: params.getAll('albums'),
+    };
+    try {
+        const r = await fetch(`/api/albums/${selectedAlbumId}/bulk-${action}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler');
+        alert(data.message);
+        await loadAlbumFilterOptions();
+        reloadFiles();
+    } catch (e) {
+        alert('❌ ' + e.message);
     }
 }
 
@@ -220,6 +486,8 @@ function toggleContext() {
     if (currentView === 'timeline') reloadTimelineView();
 }
 
+let storedFilters = null;
+
 async function initFilesPage() {
     // Auf schmalen Displays startet der Filterbereich eingeklappt, damit die
     // Liste/Timeline sofort sichtbar ist.
@@ -228,9 +496,23 @@ async function initFilesPage() {
         document.getElementById('files-layout').classList.add('context-collapsed');
     }
     TagSelect.init(document.getElementById('tag-select'), { onChange: reloadFiles });
+    AlbumSelect.init(document.getElementById('album-select'), { onChange: reloadFiles });
     document.getElementById('files-scroll').addEventListener('scroll', onListScroll, { passive: true });
     window.addEventListener('resize', () => { if (currentView === 'list') renderVirtualRows(); });
+
+    // Zuvor gespeicherte Filterwerte wiederherstellen, sofern die URL keine eigenen
+    // Filter-Parameter mitbringt (z.B. über einen geteilten Link) - URL hat Vorrang.
+    storedFilters = loadStoredFilters();
+    if (!window.location.search && storedFilters) {
+        document.getElementById('filter-q').value = storedFilters.q || '';
+        document.getElementById('filter-status').value = storedFilters.status || '';
+        document.getElementById('filter-type').value = storedFilters.content_type || '';
+        document.getElementById('filter-date-from').value = storedFilters.date_from || '';
+        document.getElementById('filter-date-to').value = storedFilters.date_to || '';
+    }
+
     await loadTagFilterOptions();
+    await loadAlbumFilterOptions();
     reloadFiles();
 }
 initFilesPage();
@@ -430,6 +712,9 @@ async function reloadTimelineView() {
                 <p class="timeline-day-placeholder"><small>Scrollen zum Laden…</small></p>
             </div>
         </div>`).join('');
+    // Für die Vollbild-Navigation gemerkt: Tage in Anzeige-Reihenfolge + aktuelle Filter.
+    window.timelineDates = data.days.map(day => day.date);
+    window.timelineFilterParams = params;
     observeTimelineDays();
 }
 
@@ -481,6 +766,8 @@ function timelineTileHtml(f) {
         : `<div class="thumb-tile-icon">${icon}</div>`;
     return `
     <div class="thumb-tile ${hasThumb ? '' : 'thumb-fallback'}"
+         data-id="${f.id}"
+         data-mime="${escapeHtml(f.mime_type || '')}"
          data-name="${escapeHtml(f.original_filename)}"
          data-type="${escapeHtml(f.content_type || '')}"
          data-date="${escapeHtml((f.created_at || f.imported_at || '').slice(0, 10))}"

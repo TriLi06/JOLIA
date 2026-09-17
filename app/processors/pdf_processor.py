@@ -23,6 +23,9 @@ class PdfProcessor(BaseProcessor):
 
         bundle_id = scan_bundle_service.bundle_id_from_pdf_name(file_record.original_filename or "")
         bundle_meta = scan_bundle_service.load_bundle_meta(bundle_id, config) if bundle_id else None
+        from app.services import sidecar_service
+        sidecar_data = sidecar_service.read_json_sidecar(file_path) or {}
+        scan_sidecar = sidecar_data.get("scan_bundle") or {}
 
         # Prüfen ob OCR nötig ist (weniger als 50 Zeichen pro Seite im Schnitt).
         # Bei gebündelten Scans hat Tesseract den Textlayer bereits erzeugt – ein
@@ -39,8 +42,11 @@ class PdfProcessor(BaseProcessor):
                 logger.warning("OCR fehlgeschlagen für %s: %s", file_path.name, exc)
 
         page_visions: list[tuple[int, str, str]] = []
-        if bundle_meta:
-            page_visions = self._analyze_bundle_pages(bundle_id, config)
+        if getattr(config.scan, "vision_ocr_scanned_pdfs", True) and getattr(config.scan, "vision_per_page", True):
+            if bundle_meta:
+                page_visions = self._analyze_bundle_pages(bundle_id, config)
+            elif scan_sidecar or is_scan:
+                page_visions = self._analyze_pdf_pages(file_path, config)
 
         full_text = "\n\n".join(f"[Seite {p}]\n{t}" for p, t in pages if t.strip())
         vision_text = "\n\n".join(
@@ -60,6 +66,8 @@ class PdfProcessor(BaseProcessor):
             metadata["Quelle"] = f"Scan ({bundle_meta.get('source', 'unbekannt')})"
             metadata["Durchsuchbarer Textlayer"] = "Ja" if bundle_meta.get("has_text_layer") else "Nein"
             metadata["KI-Bildanalyse"] = f"{len(page_visions)} Seite(n)" if page_visions else "Nein"
+        elif page_visions:
+            metadata["KI-OCR"] = f"{len(page_visions)} Seite(n)"
 
         json_data = {
             "file_id": file_record.id,
@@ -73,6 +81,7 @@ class PdfProcessor(BaseProcessor):
             "pages": len(pages),
             "word_count": len(full_text.split()),
             "ocr_used": is_scan,
+            "vision_ocr_used": bool(page_visions),
         }
         if bundle_meta:
             json_data["scan_bundle"] = {
@@ -124,6 +133,26 @@ class PdfProcessor(BaseProcessor):
         if config.scan.vision_max_pages > 0:
             images = images[: config.scan.vision_max_pages]
 
+        return self._analyze_page_images(images, config, "Seite {} eines gescannten Dokuments")
+
+    def _analyze_pdf_pages(self, file_path: Path, config) -> list[tuple[int, str, str]]:
+        """Rendert Scan-PDFs erneut, wenn die Bundle-Temporärbilder nicht mehr existieren."""
+        import tempfile
+        from pdf2image import convert_from_path
+
+        with tempfile.TemporaryDirectory(prefix="jolia-ocr-") as workdir:
+            image_paths: list[Path] = []
+            for page_no, image in enumerate(convert_from_path(str(file_path), dpi=200), start=1):
+                image_path = Path(workdir) / f"page-{page_no:04d}.jpg"
+                image.save(image_path, "JPEG", quality=95)
+                image.close()
+                image_paths.append(image_path)
+            return self._analyze_page_images(image_paths, config, "Seite {} eines gescannten Dokuments")
+
+    def _analyze_page_images(
+        self, images: list[Path], config, context_template: str,
+    ) -> list[tuple[int, str, str]]:
+        """Analysiert gerenderte Scan-Seiten mit Vision-OCR und liefert Suchindex-Chunks."""
         timeout = getattr(config.models, "vision_ollama_timeout", config.models.ollama_timeout)
         results: list[tuple[int, str, str]] = []
         for page_no, image_path in enumerate(images, start=1):
@@ -133,7 +162,7 @@ class PdfProcessor(BaseProcessor):
                     config.models.vision_ollama_model,
                     config.models.ollama_base_url,
                     timeout,
-                    context_lines=[f"Seite {page_no} eines gescannten Dokuments"],
+                    context_lines=[context_template.format(page_no)],
                 )
             except Exception as exc:
                 logger.warning("Vision-Analyse für Seite %d fehlgeschlagen: %s", page_no, exc)

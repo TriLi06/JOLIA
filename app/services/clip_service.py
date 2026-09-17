@@ -21,6 +21,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from app.services import model_lifecycle
+
 logger = logging.getLogger(__name__)
 
 # --- OpenCLIP-Zustand (nur für openclip-Backend) ---
@@ -28,6 +30,28 @@ _clip_model = None
 _clip_preprocess = None
 _clip_model_name: str = ""
 _clip_pretrained: str = ""
+
+_LIFECYCLE_NAME = "clip_openclip_model"
+
+
+def _unload_openclip_model() -> None:
+    global _clip_model, _clip_preprocess, _clip_model_name, _clip_pretrained
+    _clip_model = None
+    _clip_preprocess = None
+    _clip_model_name = ""
+    _clip_pretrained = ""
+    model_lifecycle.gc_cleanup()
+
+
+model_lifecycle.register(_LIFECYCLE_NAME, _unload_openclip_model)
+
+
+def _idle_unload_minutes() -> float:
+    try:
+        from app.config import get_config
+        return get_config().models.model_idle_unload_minutes
+    except Exception:
+        return 10.0
 
 
 def _get_clip_backend() -> str:
@@ -203,6 +227,7 @@ def _embed_image_openclip(image_path: Path, model_name: str, pretrained: str) ->
     with torch.no_grad():
         features = _clip_model.encode_image(img_tensor)  # type: ignore[misc]
         features = features / features.norm(dim=-1, keepdim=True)
+    model_lifecycle.touch(_LIFECYCLE_NAME, _idle_unload_minutes())
     return features[0].tolist()
 
 
@@ -215,5 +240,6 @@ def _embed_text_openclip(text: str, model_name: str, pretrained: str) -> list[fl
     with torch.no_grad():
         features = _clip_model.encode_text(tokens)  # type: ignore[misc]
         features = features / features.norm(dim=-1, keepdim=True)
+    model_lifecycle.touch(_LIFECYCLE_NAME, _idle_unload_minutes())
     return features[0].tolist()
 

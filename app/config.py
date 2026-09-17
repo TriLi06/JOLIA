@@ -37,13 +37,26 @@ class PathsConfig(BaseModel):
 
 
 class ModelsConfig(BaseModel):
-    embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    embedding_backend: str = "sentence-transformers"   # "sentence-transformers" | "ollama"
+    embedding_model: str = "bge-m3"
+    embedding_backend: str = "ollama"                  # "sentence-transformers" | "ollama"
     embedding_device: str = "auto"                     # "auto" | "cpu" | "cuda" | "mps"
-    embedding_ollama_model: str = "nomic-embed-text"
+    embedding_ollama_model: str = "bge-m3"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:3b"
+    # Modell für langsame Hintergrundaufgaben wie Tags und Medienzusammenfassungen.
+    background_ollama_model: str = "qwen2.5:7b"
+    # Separates, langsameres Modell für Hintergrund-Kategorisierung.
+    categorization_ollama_model: str = "qwen2.5:7b"
     ollama_timeout: float = 300.0                       # Sekunden; bei CPU-Betrieb ggf. erhöhen
+    # Wie lange Ollama ein Modell nach der letzten Anfrage im (V)RAM behält, bevor es
+    # selbstständig entladen wird (Ollama-Format, z.B. "10m", "0" = sofort entladen).
+    # Chat-/Vision-/Embedding-Modelle werden dadurch NICHT beim Start, sondern erst bei
+    # der ersten Anfrage geladen und nach Leerlauf automatisch wieder freigegeben.
+    ollama_keep_alive: str = "10m"
+    # Leerlaufzeit (Minuten) bevor lokal (im JOLIA-Prozess) geladene Modelle wie
+    # SentenceTransformer/OpenCLIP/CLAP wieder aus dem Speicher entladen werden.
+    # 0 oder negativ = sofort nach jeder Nutzung entladen.
+    model_idle_unload_minutes: float = 10.0
     vision_backend: str = "tesseract"               # "tesseract" | "ollama"
     vision_ollama_model: str = "minicpm-v"  # CPU-Empfehlung: "minicpm-v" (starke OCR/Beschreibung). Alt.: "llava:7b", "qwen2.5vl:7b", "llama3.2-vision:11b"
     vision_ollama_timeout: float = 900.0             # Sekunden pro Bild; auf reiner CPU großzügig wählen
@@ -83,6 +96,8 @@ class ProcessingConfig(BaseModel):
     enable_image_ocr: bool = True
     # Nach dem Import per KI passende Tags (Rechnung, Arzt, Urlaubsfoto, ...) vorschlagen und zuweisen.
     enable_tag_suggestion: bool = True
+    # Nach dem Import per KI einen Kategorie-Breadcrumb-Pfad ermitteln und zuweisen (z.B. Dokumente > Rechnungen > Auto).
+    enable_auto_categorization: bool = True
     ocr_languages: str = "deu+eng"
     ocr_confidence_threshold: int = 60
     video_thumbnail_offset_pct: int = 10
@@ -125,6 +140,8 @@ class ScanConfig(BaseModel):
     pdf_jpeg_quality: int = 85
     # Pro Seite zusätzlich eine Ollama-Vision-Analyse (Bildinhalte, Handschrift) ausführen.
     vision_per_page: bool = True
+    # Vision-OCR auch bei Scan-PDFs ausführen, deren temporäre Bundle-Bilder bereits gelöscht wurden.
+    vision_ocr_scanned_pdfs: bool = True
     # Deckel für die Vision-Analyse; 0 = alle Seiten (auf CPU sehr langsam).
     vision_max_pages: int = 0
     # >0: Seitenbilder nach der Verarbeitung noch N Sekunden im temp_dir aufheben (Debug).
@@ -202,6 +219,8 @@ _ENV_OVERRIDES: tuple[tuple[str, tuple[str, ...], Callable[[str], Any]], ...] = 
     ("OLLAMA_BASE_URL", ("models", "ollama_base_url"), _env_str),
     ("OLLAMA_MODEL", ("models", "ollama_model"), _env_str),
     ("JOLIA_OLLAMA_TIMEOUT", ("models", "ollama_timeout"), _env_float),
+    ("JOLIA_OLLAMA_KEEP_ALIVE", ("models", "ollama_keep_alive"), _env_str),
+    ("JOLIA_MODEL_IDLE_UNLOAD_MINUTES", ("models", "model_idle_unload_minutes"), _env_float),
     # tiny | base | small | medium | large – kleiner = schneller auf der CPU
     ("JOLIA_WHISPER_MODEL", ("models", "whisper_python_model"), _env_str),
     # Mirror, falls huggingface.co nicht erreichbar ist (z.B. Firmennetz)
@@ -214,6 +233,7 @@ _ENV_OVERRIDES: tuple[tuple[str, tuple[str, ...], Callable[[str], Any]], ...] = 
     ("JOLIA_ENABLE_VIDEO_TRANSCRIPTION", ("processing", "enable_video_transcription"), _env_bool),
     ("JOLIA_ENABLE_MEDIA_SUMMARIZATION", ("processing", "enable_media_summarization"), _env_bool),
     ("JOLIA_ENABLE_TAG_SUGGESTION", ("processing", "enable_tag_suggestion"), _env_bool),
+    ("JOLIA_ENABLE_AUTO_CATEGORIZATION", ("processing", "enable_auto_categorization"), _env_bool),
     ("JOLIA_ENABLE_CLIP_EMBEDDINGS", ("processing", "enable_clip_embeddings"), _env_bool),
     ("JOLIA_ENABLE_CLAP_EMBEDDINGS", ("processing", "enable_clap_embeddings"), _env_bool),
     ("JOLIA_ENABLE_FACE_DETECTION", ("processing", "enable_face_detection"), _env_bool),

@@ -250,12 +250,8 @@ class VideoProcessor(BaseProcessor):
     def _summarize(self, transcript: str, video_meta: dict, filename: str, config) -> str | None:
         """Erstellt eine kurze Inhaltszusammenfassung via Ollama für besseres Clustering."""
         try:
-            from app.services.ollama_service import OllamaService
-            svc = OllamaService(
-                base_url=config.models.ollama_base_url,
-                model=config.models.ollama_model,
-                timeout=config.models.ollama_timeout,
-            )
+            from app.services.ollama_service import get_background_ollama_service
+            svc = get_background_ollama_service()
             meta_hints = []
             for key in ("duration", "resolution", "fps"):
                 if video_meta.get(key):

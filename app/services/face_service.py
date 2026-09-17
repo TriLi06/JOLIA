@@ -99,7 +99,12 @@ def rebuild_person_clusters(db: Session) -> dict:
     # Alle Encodings laden
     all_encodings = db.query(FaceEncoding).all()
     if not all_encodings:
-        return {"clusters": 0, "faces": 0}
+        # Auch ohne verbleibende Encodings können Karteileichen-Cluster existieren
+        # (z.B. nach einem Rebuild, bei dem alle Bilder entfernt wurden) - sonst
+        # blieben sie mit Platzhalterbild/ohne Zuordnung dauerhaft sichtbar.
+        deleted = db.query(PersonCluster).delete()
+        db.commit()
+        return {"clusters": 0, "faces": 0, "removed_orphans": deleted}
 
     encodings_array = np.array([json.loads(fe.encoding) for fe in all_encodings])
 

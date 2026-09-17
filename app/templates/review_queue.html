@@ -10,8 +10,7 @@
 </nav>
 
 <h1>✏️ Review-Warteschlange</h1>
-<p>Diese Dateien haben einen niedrigen OCR-Konfidenzwert oder benötigen manuelle Überprüfung.
-   Bitte korrigiere den erkannten Text, damit die Suche verbessert wird.</p>
+<p>Diese Dateien benötigen wegen OCR oder der automatischen Kategorisierung eine manuelle Überprüfung.</p>
 
 {% if files %}
 <p><strong>{{ total }} Datei(en) warten auf Überprüfung</strong></p>
@@ -20,6 +19,7 @@
         <tr>
             <th>Dateiname</th>
             <th>Typ</th>
+            <th>Grund</th>
             <th>Konfidenz</th>
             <th>Importiert</th>
             <th>Aktionen</th>
@@ -32,6 +32,22 @@
                 <a href="/review/{{ f.id }}">{{ f.original_filename }}</a>
             </td>
             <td><small>{{ f.content_type or '–' }}</small></td>
+            <td>
+                {% if f.category_needs_review and f.status == 'needs_review' %}
+                    <small>OCR-Konfidenz zu niedrig</small><br>
+                    <small>Kategorie: {{ f.category_review_reason or 'KI-Vorschlag unsicher' }}</small>
+                {% elif f.category_needs_review %}
+                    <small>Kategorie: {{ f.category_review_reason or 'KI-Vorschlag unsicher' }}</small>
+                {% else %}
+                    <small>OCR-Konfidenz zu niedrig</small>
+                {% endif %}
+                {% if f.category_ai_response %}
+                <details style="margin-top:.35rem">
+                    <summary><small>KI-Antwort anzeigen</small></summary>
+                    <pre style="white-space:pre-wrap;font-size:.8rem;margin:.35rem 0">{{ f.category_ai_response }}</pre>
+                </details>
+                {% endif %}
+            </td>
             <td>
                 {% set conf = f.sidecar_json_confidence %}
                 {% if conf is not none %}

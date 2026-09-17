@@ -1,15 +1,22 @@
-{% if file.content_type == 'images' %}
-<div style="text-align:center">
-    <img src="/api/files/{{ file.id }}/thumbnail" alt="{{ file.original_filename }}" class="file-detail-thumb"
-         onerror="this.style.display='none'">
-</div>
-{% endif %}
+{% set is_previewable_without_thumb = file.content_type in ('audio', 'video') or file.mime_type in ('text/plain', 'text/markdown') %}
+<div id="file-preview-trigger" data-file-id="{{ file.id }}" data-mime="{{ file.mime_type or '' }}">
+    {% if file.content_type == 'images' or file.mime_type == 'application/pdf' %}
+    <div style="text-align:center">
+        <img src="/api/files/{{ file.id }}/thumbnail" alt="{{ file.original_filename }}" class="file-detail-thumb"
+             onerror="this.style.display='none'">
+    </div>
+    {% endif %}
 
-{% if file.ai_summary %}
-<div class="ai-summary-banner">
-    🤖 <strong>KI-Zusammenfassung:</strong> {{ file.ai_summary }}
+    {% if file.ai_summary %}
+    <div class="ai-summary-banner">
+        🤖 <strong>KI-Zusammenfassung:</strong> {{ file.ai_summary }}
+    </div>
+    {% elif is_previewable_without_thumb %}
+    <div class="ai-summary-banner file-preview-placeholder">
+        {{ '🎵' if file.content_type == 'audio' else '🎬' if file.content_type == 'video' else '🔍' }} Vorschau anzeigen
+    </div>
+    {% endif %}
 </div>
-{% endif %}
 
 {% if person_names %}
 <div id="person-names-section" style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-bottom:.75rem">
@@ -120,6 +127,19 @@
 </article>
 {% endif %}
 
+<!-- Kategorie -->
+<article id="category-section">
+    <h3>🗂️ Kategorie</h3>
+    <p><small>Brotkrumen-Einordnung in die Kategorie-Struktur (siehe <a href="/categories">Kategorien-Seite</a>).</small></p>
+    <div id="category-current" style="margin-bottom:.5rem"></div>
+    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <select id="category-select-input" style="flex:1 1 180px;min-width:0" onchange="setFileCategoryFromSelect('{{ file.id }}')">
+            <option value="">Kategorie wählen…</option>
+        </select>
+    </div>
+    <div id="category-result"></div>
+</article>
+
 <!-- Tags -->
 <article id="tags-section">
     <h3>🏷️ Tags</h3>
@@ -132,6 +152,19 @@
         <a href="#" id="find-by-tags-link" role="button" class="outline secondary" title="Ähnliche Dateien per Tags finden (Volltextsuche)">🔍 Per Tags finden</a>
     </div>
     <div id="tags-result"></div>
+</article>
+
+<!-- Alben -->
+<article id="albums-section">
+    <h3>📁 Alben</h3>
+    <p><small>Ordnen Sie diese Datei einem oder mehreren Alben zu.</small></p>
+    <div id="albums-badges" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.5rem"></div>
+    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <select id="album-select-input" style="flex:1 1 180px;min-width:0" onchange="addAlbumFromInput('{{ file.id }}')">
+            <option value="">Album wählen…</option>
+        </select>
+    </div>
+    <div id="albums-result"></div>
 </article>
 
 <!-- Manuelle Beschreibung -->

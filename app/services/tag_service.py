@@ -109,9 +109,9 @@ def suggest_tags(db: Session, text_context: str, is_image: bool = False) -> list
     if not text_context:
         return []
     try:
-        from app.services.ollama_service import get_ollama_service
+        from app.services.ollama_service import get_background_ollama_service
 
-        ollama = get_ollama_service()
+        ollama = get_background_ollama_service()
         if not ollama.is_available():
             return []
 
