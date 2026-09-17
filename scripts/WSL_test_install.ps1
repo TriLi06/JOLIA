@@ -111,7 +111,7 @@ $startCmd = "service docker start >/dev/null 2>&1 && cd $AppDirLinux && docker c
 wsl.exe -d $DistroName -u root -- bash -c $startCmd
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "Docker oder JOLIA konnte nicht gestartet werden."
-    Write-Warn "Manueller Start: wsl -d $DistroName -u root -- bash -c \"service docker start && cd $AppDirLinux && docker compose up -d\""
+    Write-Warn "Manueller Start: wsl -d $DistroName -u root -- bash -c ""service docker start && cd $AppDirLinux && docker compose up -d"""
     exit 1
 }
 
@@ -137,5 +137,5 @@ if ($healthy) {
 Write-Host ""
 Write-Host "=== Fertig ===" -ForegroundColor Cyan
 Write-Host "Kein Windows-Autostart wurde angelegt." -ForegroundColor Green
-Write-Host "Manueller Start: wsl -d $DistroName -u root -- bash -c \"service docker start && cd $AppDirLinux && docker compose up -d\"" -ForegroundColor DarkGray
+Write-Host "Manueller Start: wsl -d $DistroName -u root -- bash -c ""service docker start && cd $AppDirLinux && docker compose up -d""" -ForegroundColor DarkGray
 Write-Host "Testinstallation: $InstallRoot" -ForegroundColor DarkGray
