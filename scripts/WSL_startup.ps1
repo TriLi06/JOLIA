@@ -25,8 +25,7 @@ $TaskName    = "JOLIA-WSL-Autostart"
 # Offizielle Ubuntu-WSL-Rootfs-Tarballs (für "wsl --import", kein Store-Ubuntu,
 # daher keine interaktive Ersteinrichtung nötig). Erste erreichbare URL gewinnt.
 $RootfsUrls = @(
-    "https://cloud-images.ubuntu.com/wsl/noble/current/ubuntu-noble-wsl-amd64-ubuntu.rootfs.tar.gz",
-    "https://cloud-images.ubuntu.com/wsl/jammy/current/ubuntu-jammy-wsl-amd64-ubuntu.rootfs.tar.gz"
+    "https://cloud-images.ubuntu.com/wsl/jammy/current/ubuntu-jammy-wsl-amd64-ubuntu22.04lts.rootfs.tar.gz"
 )
 
 function Write-Step  ($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
