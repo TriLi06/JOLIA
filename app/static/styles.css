@@ -1,0 +1,1912 @@
+/* JOLIA Docs – Eigene Styles (Ergänzung zu Pico CSS) */
+
+/* ============================================================
+   GitHub-Dark Farbpalette (Overrides der Pico-Variablen)
+   ============================================================ */
+[data-theme="dark"] {
+    --pico-background-color: #0d1117;
+    --pico-color: #e6edf3;
+    --pico-h1-color: #f0f6fc;
+    --pico-h2-color: #f0f6fc;
+    --pico-h3-color: #f0f6fc;
+    --pico-h4-color: #e6edf3;
+    --pico-h5-color: #e6edf3;
+    --pico-h6-color: #e6edf3;
+    --pico-muted-color: #7d8590;
+    --pico-muted-border-color: #30363d;
+    --pico-card-background-color: #161b22;
+    --pico-card-border-color: #30363d;
+    --pico-card-sectioning-background-color: #161b22;
+    --pico-table-border-color: #30363d;
+    --pico-table-row-stripped-background-color: #12171f;
+    --pico-secondary-background: #21262d;
+    /* Links blau, primäre Buttons neutral (GitHub-Stil), Grün nur für Aktionen */
+    --pico-primary: #2f81f7;
+    --pico-primary-hover: #58a6ff;
+    --pico-primary-focus: rgba(47, 129, 247, 0.3);
+    --pico-primary-background: #21262d;
+    --pico-primary-hover-background: #30363d;
+    --pico-primary-border: #30363d;
+    --pico-primary-hover-border: #8b949e;
+    --pico-primary-inverse: #e6edf3;
+    --pico-secondary: #8b949e;
+    --pico-secondary-hover: #b1bac4;
+    --pico-form-element-background-color: #0d1117;
+    --pico-form-element-border-color: #30363d;
+    --pico-form-element-active-background-color: #0d1117;
+    --pico-form-element-active-border-color: #2f81f7;
+    --pico-form-element-focus-color: rgba(47, 129, 247, 0.3);
+    --pico-del-color: #f85149;
+    --pico-ins-color: #2ea043;
+    --pico-border-radius: 6px;
+    /* Aliase für die (in Pico v2 entfernten) alten Variablennamen,
+       damit bestehende Custom-Komponenten im Dark-Mode korrekt eingefärbt werden. */
+    --color: var(--pico-color);
+    --background-color: var(--pico-background-color);
+    --card-background-color: var(--pico-card-background-color);
+    --card-border-color: var(--pico-card-border-color);
+    --table-border-color: var(--pico-muted-border-color);
+    --muted-color: var(--pico-muted-color);
+    --muted-border-color: var(--pico-muted-border-color);
+    --primary: var(--pico-primary);
+    --primary-inverse: #ffffff;
+    --secondary: var(--pico-secondary);
+    --secondary-background: var(--pico-secondary-background);
+    --del-color: var(--pico-del-color);
+    --ins-color: var(--pico-ins-color);
+    --border-radius: var(--pico-border-radius);
+}
+
+html {
+    /* Verhindert, dass mobile Browser die Schrift beim Drehen eigenmächtig skalieren */
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    background: var(--pico-background-color);
+    overflow-wrap: break-word;
+}
+
+/* Medien nie breiter als ihr Container – verhindert horizontales Scrollen */
+img,
+video,
+canvas,
+iframe {
+    max-width: 100%;
+}
+
+pre {
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Inline-SVG-Icons (Feather-Stil, strichbasiert) */
+.icon {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex: none;
+    vertical-align: middle;
+}
+
+/* ============================================================
+   Top-Bar Navigation
+   ============================================================ */
+.app-nav {
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    position: sticky;
+    top: 0;
+    z-index: 500;
+}
+.app-nav-inner {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 1.25rem;
+    flex-wrap: wrap;
+}
+.app-nav .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--pico-color);
+    text-decoration: none;
+    margin-right: 0.5rem;
+}
+.app-nav .brand .icon {
+    width: 20px;
+    height: 20px;
+    color: #2f81f7;
+}
+.nav-primary {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    margin: 0;
+}
+.nav-primary a,
+.nav-secondary a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: 6px;
+    color: #c9d1d9;
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: background 0.12s, color 0.12s;
+}
+.nav-primary a:hover,
+.nav-secondary a:hover {
+    background: #21262d;
+    color: #ffffff;
+}
+.nav-primary a.is-active {
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: inset 0 -2px 0 0 #f78166;
+    border-radius: 6px 6px 0 0;
+}
+.nav-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.nav-scan {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.4rem 0.85rem;
+    border-radius: 6px;
+    background: #238636;
+    color: #ffffff !important;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    border: 1px solid rgba(240, 246, 252, 0.1);
+    transition: background 0.12s;
+}
+.nav-scan:hover {
+    background: #2ea043;
+}
+.nav-secondary {
+    display: flex;
+    align-items: center;
+    gap: 0.1rem;
+    margin: 0;
+    padding-left: 0.75rem;
+    border-left: 1px solid #30363d;
+}
+.nav-secondary a {
+    padding: 0.4rem;
+    color: #8b949e;
+}
+.nav-secondary a.is-active {
+    background: #21262d;
+    color: #ffffff;
+}
+
+/* Globaler Hinweisbalken (z. B. Modell-Mismatch) */
+.app-banner {
+    display: block;
+    background: #341a00;
+    color: #e3b341;
+    border-bottom: 1px solid #5a3a00;
+    padding: 0.5rem 1.25rem;
+    text-align: center;
+    font-size: 0.85rem;
+    text-decoration: none;
+}
+.app-banner:hover {
+    background: #3d2200;
+    color: #f2cc60;
+}
+
+/* ============================================================
+   Dateien-Seite: Voll­breiten-Layout + Kontext-Sidebar
+   ============================================================ */
+/* Der Container der Dateien-Seite wird selbst auf Vollbreite gesetzt, statt
+   per 100vw auszubrechen (100vw ignoriert die Scrollbar → horizontaler Überlauf). */
+main.container:has(> .files-fullbleed) {
+    max-width: none;
+    padding-inline: 0;
+}
+.files-fullbleed {
+    width: 100%;
+    max-width: 100%;
+    padding: 0 1.5rem;
+    box-sizing: border-box;
+}
+.files-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+.files-header h1 {
+    margin: 0;
+    font-size: 1.4rem;
+}
+.files-header .files-total {
+    color: var(--pico-muted-color);
+    font-size: 0.85rem;
+    font-weight: 400;
+}
+.files-header .files-header-spacer {
+    flex: 1 1 auto;
+}
+.context-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    width: auto;
+    margin: 0;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.85rem;
+}
+.view-switch {
+    display: inline-flex;
+    gap: 0.25rem;
+}
+.view-switch button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    width: auto;
+    margin: 0;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.85rem;
+}
+
+.files-layout {
+    display: flex;
+    gap: 1.25rem;
+    align-items: flex-start;
+}
+.files-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.context-sidebar {
+    flex: 0 0 250px;
+    width: 250px;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    position: sticky;
+    top: 64px;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+}
+.category-layout .context-sidebar {
+    flex-basis: 340px;
+    width: 340px;
+}
+.files-layout.context-collapsed .context-sidebar {
+    display: none;
+}
+.context-sidebar h2 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--pico-muted-color);
+    margin: 0 0 0.85rem;
+}
+.filter-field {
+    margin-bottom: 0.9rem;
+}
+.filter-field > label {
+    display: block;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--pico-muted-color);
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+}
+.filter-field input,
+.filter-field select {
+    margin-bottom: 0;
+    font-size: 0.85rem;
+}
+.context-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+.context-actions button {
+    width: auto;
+    margin: 0;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.8rem;
+}
+
+/* ============================================================
+   Jira-artige Mehrfachauswahl (Badges in einer Zeile) - wird von
+   Tags UND Alben genutzt (Farbe kommt von .tag-token/.album-token)
+   ============================================================ */
+.token-select {
+    position: relative;
+}
+.token-select-control {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem;
+    min-height: 38px;
+    padding: 0.3rem 0.4rem;
+    background: var(--pico-form-element-background-color);
+    border: 1px solid var(--pico-form-element-border-color);
+    border-radius: 6px;
+    cursor: text;
+}
+.token-select-control.focused {
+    border-color: #2f81f7;
+    box-shadow: 0 0 0 3px rgba(47, 129, 247, 0.3);
+}
+.tag-token,
+.album-token {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.1rem 0.1rem 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.tag-token {
+    background: rgba(31, 111, 235, 0.2);
+    color: #79c0ff;
+    border: 1px solid rgba(31, 111, 235, 0.35);
+}
+.album-token {
+    background: rgba(163, 113, 247, 0.2);
+    color: #d2a8ff;
+    border: 1px solid rgba(163, 113, 247, 0.35);
+}
+.tag-token button,
+.album-token button {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 0 0.35rem;
+    margin: 0;
+    font-size: 0.9rem;
+    line-height: 1;
+    width: auto;
+    border-radius: 999px;
+}
+.tag-token button:hover {
+    background: rgba(31, 111, 235, 0.4);
+    color: #fff;
+}
+.album-token button:hover {
+    background: rgba(163, 113, 247, 0.4);
+    color: #fff;
+}
+.token-select-input {
+    flex: 1 1 60px;
+    min-width: 60px;
+    border: none;
+    background: transparent;
+    outline: none;
+    color: var(--pico-color);
+    font-size: 0.85rem;
+    padding: 0.2rem;
+    margin: 0;
+    box-shadow: none;
+}
+.token-select-dropdown {
+    position: absolute;
+    z-index: 60;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.token-select-option {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+.token-select-option:hover,
+.token-select-option.active {
+    background: #21262d;
+}
+.token-select-option .count {
+    color: var(--pico-muted-color);
+    font-size: 0.75rem;
+}
+.token-select-empty {
+    padding: 0.5rem 0.6rem;
+    color: var(--pico-muted-color);
+    font-size: 0.8rem;
+}
+
+.album-manage-link {
+    display: inline-block;
+    margin-top: 0.35rem;
+    font-size: 0.85rem;
+}
+
+/* Album-Verwaltungsmenü (neben dem Filter-Menü in der Timeline-Ansicht) */
+.album-sidebar {
+    flex: 0 0 260px;
+    width: 260px;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    position: sticky;
+    top: 64px;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+}
+.album-sidebar.album-collapsed {
+    display: none;
+}
+.album-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 0.75rem 0;
+}
+.album-list-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    padding: 0.35rem 0.4rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+.album-list-item:hover {
+    background: rgba(163, 113, 247, 0.1);
+}
+.album-list-item .album-list-name {
+    font-weight: 600;
+    color: #d2a8ff;
+}
+.album-list-item .album-list-desc {
+    display: block;
+    color: var(--pico-muted-color);
+    font-size: 0.75rem;
+}
+.album-list-item .album-list-count {
+    color: var(--pico-muted-color);
+    font-size: 0.72rem;
+}
+.album-bulk-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+.album-bulk-actions button {
+    width: auto;
+    margin: 0;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+@media (max-width: 900px) {
+    .files-layout {
+        flex-direction: column;
+        /* Ohne stretch würden Sidebar und Hauptbereich im Spalten-Flex
+           auf Inhaltsbreite schrumpfen statt die volle Breite zu nutzen. */
+        align-items: stretch;
+    }
+    .files-main {
+        width: 100%;
+    }
+    .context-sidebar,
+    .album-sidebar {
+        position: static;
+        width: 100%;
+        flex: 0 0 auto;
+        max-height: none;
+    }
+    .nav-primary a span,
+    .nav-scan span {
+        display: none;
+    }
+}
+
+/* Navigation */
+nav .brand {
+    text-decoration: none;
+    color: inherit;
+    font-size: 1.1rem;
+}
+
+/* Flash-Meldungen */
+.flash-message {
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    border-radius: var(--border-radius);
+    background: var(--ins-color);
+    color: white;
+}
+
+/* Status-Badges */
+.status-badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+.status-processed    { background: rgba(46,160,67,0.15);  color: #3fb950; border-color: rgba(46,160,67,0.4); }
+.status-processing   { background: rgba(47,129,247,0.15); color: #58a6ff; border-color: rgba(47,129,247,0.4); }
+.status-queued       { background: rgba(139,148,158,0.15); color: #8b949e; border-color: rgba(139,148,158,0.4); }
+.status-imported     { background: rgba(47,129,247,0.1);  color: #79c0ff; border-color: rgba(47,129,247,0.3); }
+.status-failed       { background: rgba(248,81,73,0.15);  color: #f85149; border-color: rgba(248,81,73,0.4); }
+.status-needs_review { background: rgba(210,153,34,0.15); color: #e3b341; border-color: rgba(210,153,34,0.4); }
+.status-skipped_duplicate { background: rgba(139,148,158,0.12); color: #8b949e; border-color: rgba(139,148,158,0.3); }
+.status-deleted      { background: rgba(139,148,158,0.12); color: #8b949e; border-color: rgba(139,148,158,0.3); text-decoration: line-through; }
+.status-potential_duplicate { background: rgba(210,153,34,0.15); color: #d29922; border-color: rgba(210,153,34,0.4); }
+
+/* Filter-Panel (Dateien-Liste) */
+.filter-panel {
+    background: var(--card-background-color, #fff);
+    border: 1px solid var(--card-border-color, #e2e2e2);
+    border-radius: var(--border-radius);
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+}
+.filter-panel-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem 1rem;
+}
+.filter-panel-grid label {
+    margin-bottom: 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.filter-panel-grid input,
+.filter-panel-grid select {
+    margin-top: 0.25rem;
+}
+.filter-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+}
+.filter-panel-spacer {
+    flex: 1 1 auto;
+}
+#search-btn {
+    width: auto;
+    padding-inline: 1.25rem;
+}
+
+/* Tag-Badges (Datei-Detail, Dateien-Liste) */
+.tag-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: rgba(31, 111, 235, 0.2);
+    color: #79c0ff;
+    border: 1px solid rgba(31, 111, 235, 0.35);
+}
+.tag-badge button {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 0;
+    margin: 0;
+}
+
+/* Album-Badges (Datei-Detail) - wie Tag-Badges, aber andere Farbe */
+.album-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: rgba(163, 113, 247, 0.2);
+    color: #d2a8ff;
+    border: 1px solid rgba(163, 113, 247, 0.35);
+}
+.album-badge button {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 0;
+    margin: 0;
+}
+
+/* Personen-Badges (erkannte Gesichter im Datei-Detail) */
+.person-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-decoration: none;
+    background: rgba(63, 185, 80, 0.18);
+    color: #7ee787;
+    border: 1px solid rgba(63, 185, 80, 0.35);
+}
+.person-badge:hover {
+    background: rgba(63, 185, 80, 0.3);
+}
+
+
+/* Sidebar-Detailansicht (Dateien-Liste, Suche & Timeline) */
+.file-sidebar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 500px;
+    max-width: 92vw;
+    height: 100%;
+    height: 100dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--card-background-color, #fff);
+    box-shadow: -4px 0 16px rgba(0,0,0,0.15);
+    padding: 1rem;
+    z-index: 1000;
+    transform: translateX(105%);
+    transition: transform 0.25s ease;
+}
+.file-sidebar.open { transform: translateX(0); }
+.file-sidebar-resize-handle {
+    position: absolute;
+    top: 0;
+    left: -4px;
+    width: 8px;
+    height: 100%;
+    cursor: ew-resize;
+    z-index: 1001;
+}
+.file-sidebar-resize-handle:hover,
+.file-sidebar-resize-handle:active {
+    background: rgba(0,0,0,0.1);
+}
+.file-sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.25);
+    z-index: 999;
+}
+
+/* Klickbarer Vorschaubereich im Detail-Panel (öffnet die Vollbild-Ansicht) */
+.clickable-preview {
+    cursor: pointer;
+}
+.clickable-preview:hover .file-detail-thumb {
+    opacity: 0.85;
+}
+.file-preview-placeholder {
+    cursor: pointer;
+    text-align: center;
+}
+
+/* Vollbild-Ansicht für einzelne Dateien (Bild/PDF/Text) */
+.file-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 2100;
+    background: rgba(0,0,0,0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.ff-content {
+    max-width: 92vw;
+    max-height: 92vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.ff-content img,
+.ff-content iframe,
+.ff-content video {
+    max-width: 92vw;
+    max-height: 92vh;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border: none;
+}
+.ff-content iframe {
+    width: 85vw;
+    height: 90vh;
+    background: #fff;
+    border-radius: var(--border-radius);
+}
+.ff-content audio {
+    width: min(480px, 90vw);
+}
+.ff-content pre {
+    max-width: 800px;
+    max-height: 88vh;
+    overflow: auto;
+    background: var(--card-background-color, #fff);
+    color: var(--color);
+    padding: 1.5rem;
+    border-radius: var(--border-radius);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-size: 0.9rem;
+}
+.ff-content .ff-loading,
+.ff-content .ff-error {
+    color: #fff;
+    font-size: 0.95rem;
+}
+.ff-close,
+.ff-nav,
+.ff-play {
+    position: absolute;
+    background: rgba(0,0,0,0.4);
+    color: #fff;
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+    line-height: 1;
+    opacity: 0.5;
+    transition: opacity 0.15s ease;
+}
+.ff-close:hover,
+.ff-nav:hover,
+.ff-play:hover {
+    opacity: 1;
+}
+.ff-close {
+    top: 1rem;
+    right: 1rem;
+    width: 2.5rem;
+    height: 2.5rem;
+    font-size: 1.2rem;
+}
+.ff-nav {
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3rem;
+    height: 3rem;
+    font-size: 1.8rem;
+}
+.ff-prev { left: 1rem; }
+.ff-next { right: 1rem; }
+.ff-play {
+    bottom: 1.5rem;
+    right: 1.5rem;
+    width: 3rem;
+    height: 3rem;
+    font-size: 1.2rem;
+}
+.ff-play.is-active {
+    opacity: 0.9;
+    background: var(--primary, #6ea8fe);
+}
+
+
+/* Chunks-Bereich in der Detailansicht: Titel nur einmal, klappbar */
+.chunks-details {
+    margin: .75rem 0;
+}
+.chunks-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: .5rem .75rem;
+    border: 1px solid var(--pico-muted-border-color, #30363d);
+    border-radius: 6px;
+    list-style: none;
+}
+.chunks-details summary::-webkit-details-marker {
+    display: none;
+}
+.chunks-details[open] summary {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+.chunks-list {
+    padding: .75rem;
+    border: 1px solid var(--pico-muted-border-color, #30363d);
+    border-top: none;
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
+
+/* Buttons im Detailbereich sollen immer einzeilig bleiben statt umzubrechen */
+.file-sidebar button,
+.file-sidebar [role="button"],
+.file-detail-content button,
+.file-detail-content [role="button"] {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+
+/* Duplikat-/Serien-Filmstreifen */
+.duplicate-filmstrip {
+    display: flex;
+    gap: .5rem;
+    overflow-x: auto;
+    padding: .5rem 0;
+}
+.duplicate-thumb {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    flex: none;
+    cursor: pointer;
+    border: 2px solid transparent;
+    border-radius: 4px;
+    overflow: hidden;
+}
+.duplicate-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.duplicate-thumb.is-best { border-color: gold; }
+.duplicate-thumb.is-current { outline: 2px solid var(--primary); }
+.duplicate-thumb .best-badge {
+    position: absolute; top: 0; left: 0;
+    background: gold; color: #000; font-size: 0.6rem;
+    padding: 0 3px;
+}
+.duplicate-thumb .status-badge {
+    position: absolute; bottom: 0; right: 0;
+    font-size: 0.55rem; padding: 0 3px;
+}
+
+/* Timeline-Ansicht (Tageszeilen mit Thumbnail-Kacheln, Google-Fotos-Stil) */
+#timeline-view {
+    /* Füllt die Hauptspalte des Dateien-Layouts (Vollbreite via .files-fullbleed) */
+    width: auto;
+    position: static;
+    padding: 0;
+    box-sizing: border-box;
+    overflow-x: hidden;
+}
+.timeline-day-row { margin-bottom: 1.5rem; }
+.timeline-day-header { margin: 0 0 .5rem 1.25rem; }
+.timeline-day-placeholder { margin: .5rem 0 0 1.25rem; color: var(--muted-color, #888); }
+.thumb-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 4px;
+}
+.timeline-day-grid { min-height: 128px; }
+
+/* Virtual-Scrolling der Dateien-Liste (nur sichtbare Zeilen im DOM) */
+.virtual-scroll {
+    overflow: auto;
+    max-height: calc(100vh - 320px);
+    max-height: calc(100dvh - 320px);
+    min-height: 300px;
+    -webkit-overflow-scrolling: touch;
+}
+#files-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--card-background-color, var(--background-color, #fff));
+}
+#files-table tbody tr:not(.vs-spacer) { height: 48px; }
+#files-table tbody td {
+    height: 48px;
+    padding-top: 0;
+    padding-bottom: 0;
+    vertical-align: middle;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 260px;
+}
+#files-table tbody tr.vs-spacer td {
+    padding: 0;
+    border: 0;
+    max-width: none;
+    overflow: visible;
+}
+.thumb-tile {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    cursor: pointer;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--secondary-background, #eee);
+}
+.thumb-tile img { width: 100%; height: 100%; object-fit: cover; }
+.thumb-tile.thumb-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: .25rem;
+    border: 1px solid var(--muted-border-color, #ddd);
+}
+.thumb-tile-icon {
+    font-size: 2rem;
+}
+.thumb-tile-caption {
+    font-size: 0.65rem;
+    line-height: 1.1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    word-break: break-word;
+    margin-top: .25rem;
+}
+.thumb-tooltip {
+    position: absolute;
+    max-width: 300px;
+    background: #111;
+    color: #fff;
+    font-size: 0.75rem;
+    line-height: 1.35;
+    padding: .5rem .7rem;
+    border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+    z-index: 2000;
+    pointer-events: none;
+}
+.thumb-tooltip strong { word-break: break-word; }
+.thumb-tooltip-meta { color: #bbb; }
+.thumb-tooltip-tags { color: #8ecaff; }
+.thumb-tooltip-summary {
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: #ddd;
+}
+
+/* Score-Badge in Suche */
+.score {
+    font-size: 0.75rem;
+    color: var(--muted-color);
+    float: right;
+}
+
+/* Chat */
+.chat-messages {
+    min-height: 300px;
+    max-height: 60vh;
+    max-height: 60dvh;
+    overflow-y: auto;
+    padding: 1rem;
+    border: 1px solid var(--table-border-color);
+    border-radius: var(--border-radius);
+    margin-bottom: 1rem;
+    background: var(--card-background-color);
+}
+
+.chat-message {
+    margin-bottom: 1rem;
+}
+
+.chat-user .bubble {
+    background: var(--primary);
+    color: var(--primary-inverse);
+    padding: 0.6rem 1rem;
+    border-radius: 1rem 1rem 0.25rem 1rem;
+    max-width: 80%;
+    margin-left: auto;
+    display: inline-block;
+    float: right;
+    clear: both;
+}
+
+.chat-assistant .bubble {
+    background: var(--card-background-color);
+    border: 1px solid var(--table-border-color);
+    padding: 0.6rem 1rem;
+    border-radius: 1rem 1rem 1rem 0.25rem;
+    max-width: 85%;
+    display: inline-block;
+    float: left;
+    clear: both;
+    white-space: pre-wrap;
+}
+
+.chat-message::after {
+    content: '';
+    display: table;
+    clear: both;
+}
+
+.sources {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--muted-color);
+    border-top: 1px solid var(--table-border-color);
+    padding-top: 0.25rem;
+}
+
+.chat-examples {
+    margin-top: 1rem;
+}
+
+.small {
+    font-size: 0.8rem;
+    padding: 0.25rem 0.75rem;
+}
+
+/* Error-Box */
+.error-box {
+    border-left: 4px solid var(--del-color);
+    padding: 1rem;
+}
+
+.success { color: #3fb950; }
+.error { color: #f85149; }
+
+/* Badge */
+.badge {
+    display: inline-block;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    background: var(--secondary-background);
+    color: var(--secondary);
+    margin-left: 0.5rem;
+}
+
+/* Tabellen kompakter */
+table th {
+    white-space: nowrap;
+}
+
+footer {
+    margin-top: 3rem;
+    padding: 1rem 0;
+    border-top: 1px solid var(--table-border-color);
+    text-align: center;
+    color: var(--muted-color);
+}
+
+/* Suchergebnis-Karten mit Thumbnail */
+.search-result-card header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.search-result-header-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.search-thumb {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: var(--border-radius);
+    flex-shrink: 0;
+    border: 1px solid var(--table-border-color);
+}
+
+.search-summary {
+    font-size: 0.88rem;
+    color: var(--muted-color);
+    margin-bottom: 0.25rem;
+    border-left: 3px solid var(--primary);
+    padding-left: 0.5rem;
+}
+
+.search-snippet {
+    font-size: 0.85rem;
+    color: var(--color);
+}
+
+/* Detail-Seite: Thumbnail */
+.file-detail-thumb {
+    max-width: 100%;
+    max-height: 400px;
+    object-fit: contain;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--table-border-color);
+    display: block;
+    margin-bottom: 1rem;
+}
+
+/* Detail-Seite: AI-Summary Banner */
+.ai-summary-banner {
+    background: var(--secondary-background);
+    border-left: 4px solid var(--primary);
+    padding: 0.75rem 1rem;
+    border-radius: 0 var(--border-radius) var(--border-radius) 0;
+    margin-bottom: 1rem;
+    font-size: 0.95rem;
+}
+
+/* Detail-Seite: Ähnliche Dateien */
+.similar-files-section {
+    margin-top: 2rem;
+}
+
+.similar-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.similar-suggestions button {
+    font-size: 0.85rem;
+    padding: 0.3rem 0.75rem;
+}
+
+.similar-results {
+    margin-top: 1rem;
+}
+
+.similar-card {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem;
+    border: 1px solid var(--table-border-color);
+    border-radius: var(--border-radius);
+    margin-bottom: 0.5rem;
+    text-decoration: none;
+    color: inherit;
+    transition: background 0.15s;
+}
+
+.similar-card:hover {
+    background: var(--secondary-background);
+}
+
+.similar-card-thumb {
+    width: 60px;
+    height: 60px;
+    object-fit: cover;
+    border-radius: var(--border-radius);
+    flex-shrink: 0;
+    border: 1px solid var(--table-border-color);
+}
+
+.similar-card-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.similar-card-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.similar-card-summary {
+    font-size: 0.8rem;
+    color: var(--muted-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Chat-Input für Ähnlichkeitssuche auf Detailseite */
+.similar-chat-form {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.similar-chat-form input {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+/* Scan-Seite */
+.scan-dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    text-align: center;
+    padding: 2rem 1rem;
+    margin-bottom: 1rem;
+    border: 2px dashed var(--muted-border-color, var(--table-border-color));
+    border-radius: var(--border-radius);
+    background: var(--card-sectioning-background-color, var(--card-background-color));
+    cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s;
+}
+
+.scan-dropzone:hover,
+.scan-dropzone:focus-visible {
+    border-color: var(--primary);
+}
+
+.scan-dropzone.is-dragover {
+    border-color: var(--primary);
+    background: var(--primary-focus, var(--secondary-background));
+}
+
+.scan-dropzone.is-dragover * {
+    pointer-events: none;
+}
+
+.scan-dropzone-icon {
+    font-size: 2rem;
+    line-height: 1;
+}
+
+.scan-dropzone small {
+    color: var(--muted-color);
+}
+
+.scan-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.scan-actions button {
+    margin-bottom: 0;
+    width: auto;
+}
+
+.scan-hint {
+    font-size: 0.85rem;
+    color: var(--muted-color);
+    background: var(--secondary-background);
+    border-left: 3px solid var(--primary);
+    padding: 0.5rem 0.75rem;
+    border-radius: 0 var(--border-radius) var(--border-radius) 0;
+    margin-bottom: 1rem;
+}
+
+.scan-camera {
+    margin-bottom: 1rem;
+}
+
+.scan-camera video {
+    width: 100%;
+    max-height: 60vh;
+    background: #000;
+    border-radius: var(--border-radius);
+    object-fit: contain;
+}
+
+.scan-camera-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: 0.5rem;
+}
+
+.scan-camera-controls select {
+    flex: 1;
+    min-width: 140px;
+    margin-bottom: 0;
+}
+
+.scan-camera-controls button {
+    margin-bottom: 0;
+    width: auto;
+}
+
+.scan-pages-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.scan-pages-header h2 {
+    margin-bottom: 0;
+}
+
+.scan-pages-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.scan-page-card {
+    position: relative;
+    margin: 0;
+    border: 1px solid var(--table-border-color);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    background: var(--card-background-color);
+}
+
+.scan-page-card img {
+    width: 100%;
+    height: 140px;
+    object-fit: cover;
+    display: block;
+}
+
+.scan-page-card figcaption {
+    font-size: 0.72rem;
+    color: var(--muted-color);
+    padding: 0.35rem 0.5rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.scan-page-remove {
+    position: absolute;
+    top: 0.35rem;
+    right: 0.35rem;
+    width: 1.6rem;
+    height: 1.6rem;
+    padding: 0;
+    line-height: 1;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+/* ============================================================
+   Responsive Layout – Tablets & Smartphones
+   ============================================================ */
+
+/* Tabellen mit vielen Spalten bekommen einen eigenen horizontalen
+   Scrollbereich, statt die Seite zu sprengen. */
+.table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Schlüssel/Wert-Tabelle der Detailansicht: lange Pfade/Hashes umbrechen */
+.detail-table td {
+    overflow-wrap: anywhere;
+}
+
+/* Tooltips gibt es nur mit echter Maus – auf Touch bleiben sie sonst kleben. */
+@media (hover: none) {
+    .thumb-tooltip {
+        display: none !important;
+    }
+}
+
+@media (max-width: 1024px) {
+    .files-fullbleed {
+        padding: 0 1rem;
+    }
+}
+
+/* Nur solange die Sidebar noch neben dem Inhalt steht (siehe 900px-Umbruch) */
+@media (min-width: 901px) and (max-width: 1024px) {
+    .context-sidebar,
+    .album-sidebar {
+        flex: 0 0 210px;
+        width: 210px;
+    }
+}
+
+@media (max-width: 768px) {
+    /* ---------- Navigation: kompakt und fingerfreundlich ---------- */
+    .app-nav-inner {
+        gap: 0.35rem;
+        padding: 0.35rem 0.6rem;
+    }
+    .app-nav .brand {
+        font-size: 0.95rem;
+        margin-right: 0.1rem;
+    }
+    .nav-primary {
+        gap: 0;
+    }
+    .nav-primary a,
+    .nav-secondary a,
+    .nav-scan {
+        min-height: 44px;
+        justify-content: center;
+        padding-inline: 0.6rem;
+    }
+    .nav-right {
+        gap: 0.4rem;
+    }
+    .nav-secondary {
+        padding-left: 0.35rem;
+    }
+    .app-banner {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.8rem;
+    }
+
+    /* ---------- Grundlayout ---------- */
+    main.container {
+        padding-inline: 0.75rem;
+    }
+    h1 { font-size: 1.5rem; }
+    h2 { font-size: 1.25rem; }
+    h3 { font-size: 1.1rem; }
+
+    /* Schriftgröße 16px verhindert das automatische Hineinzoomen unter iOS */
+    input,
+    select,
+    textarea,
+    .filter-field input,
+    .filter-field select,
+    .token-select-input {
+        font-size: 16px;
+    }
+
+    /* Breite Tabellen horizontal scrollen lassen (Dateiliste und
+       Detail-Schlüsseltabellen haben eigene Regeln). */
+    main table:not(#files-table):not(.detail-table) {
+        display: block;
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    /* Lieber umbrechen als scrollen: lange Pfade, Modellnamen, URLs …
+       (break-word statt anywhere, damit Tabellenspalten nicht auf
+       Ein-Buchstaben-Breite zusammenfallen) */
+    main table:not(#files-table) th {
+        white-space: normal;
+    }
+    main table:not(#files-table) td {
+        overflow-wrap: break-word;
+    }
+    code,
+    kbd {
+        overflow-wrap: anywhere;
+    }
+
+    /* ---------- Dateien-Seite ---------- */
+    .files-fullbleed {
+        padding: 0 0.75rem;
+    }
+    .files-header {
+        gap: 0.5rem;
+    }
+    .files-header h1 {
+        font-size: 1.15rem;
+    }
+    .files-header .files-header-spacer {
+        display: none;
+    }
+    .view-switch {
+        margin-left: auto;
+    }
+    .files-layout {
+        gap: 0.75rem;
+    }
+    .context-sidebar,
+    .album-sidebar {
+        padding: 0.75rem;
+    }
+    .virtual-scroll {
+        max-height: calc(100vh - 240px);
+        max-height: calc(100dvh - 240px);
+        min-height: 240px;
+    }
+    /* Nebensächliche Spalten ausblenden: Typ, Tags, Größe, Importiert */
+    #files-table th:nth-child(2),
+    #files-table td:nth-child(2),
+    #files-table th:nth-child(3),
+    #files-table td:nth-child(3),
+    #files-table th:nth-child(4),
+    #files-table td:nth-child(4),
+    #files-table th:nth-child(6),
+    #files-table td:nth-child(6) {
+        display: none;
+    }
+    #files-table tbody td {
+        max-width: none;
+    }
+    /* Feste Spaltenbreiten: die Tabelle passt sich der Bildschirmbreite an,
+       der Dateiname bekommt den Rest und wird bei Bedarf gekürzt. */
+    #files-table {
+        table-layout: fixed;
+        width: 100%;
+    }
+    #files-table th:nth-child(5),
+    #files-table td:nth-child(5) {
+        width: 100px;
+    }
+    #files-table th:nth-child(7),
+    #files-table td:nth-child(7) {
+        width: 86px;
+    }
+    /* Der Dateiname öffnet die Detailansicht bereits – Extra-Button entfällt */
+    #files-table .detail-link {
+        display: none;
+    }
+    #files-table td button.small {
+        padding-inline: 0.4rem;
+    }
+
+    /* ---------- Timeline-Kacheln ---------- */
+    .thumb-grid {
+        grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+        gap: 3px;
+    }
+    .timeline-day-header,
+    .timeline-day-placeholder {
+        margin-left: 0.25rem;
+    }
+    .timeline-day-header {
+        font-size: 1rem;
+    }
+    .timeline-day-grid {
+        min-height: 100px;
+    }
+
+    /* ---------- Detail-Sidebar: Vollbild ---------- */
+    .file-sidebar {
+        /* !important überschreibt die per localStorage gemerkte Desktop-Breite */
+        width: 100% !important;
+        max-width: 100%;
+        padding: 0.75rem 0.75rem 2rem;
+    }
+    .file-sidebar-resize-handle {
+        display: none;
+    }
+    .file-detail-thumb {
+        max-height: 45vh;
+    }
+
+    /* ---------- Chat ---------- */
+    .chat-messages {
+        max-height: 55vh;
+        max-height: 55dvh;
+        padding: 0.75rem;
+    }
+    .chat-user .bubble,
+    .chat-assistant .bubble {
+        max-width: 92%;
+    }
+    /* Eingabefeld und Senden-Button nebeneinander lassen */
+    #chat-form .grid {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.5rem;
+        align-items: center;
+    }
+    #chat-form .grid > * {
+        margin-bottom: 0;
+    }
+
+    /* ---------- Scan-Seite ---------- */
+    .scan-camera video {
+        max-height: 50vh;
+        max-height: 50dvh;
+    }
+    .scan-camera-controls select,
+    .scan-camera-controls button {
+        flex: 1 1 140px;
+    }
+    .scan-pages-grid {
+        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    }
+    .scan-page-card img {
+        height: 110px;
+    }
+
+    /* ---------- Suche / Detailseite ---------- */
+    .search-thumb {
+        width: 64px;
+        height: 64px;
+    }
+    .filter-panel {
+        padding: 0.75rem;
+    }
+    .similar-chat-form {
+        flex-wrap: wrap;
+    }
+    .similar-chat-form input {
+        flex: 1 1 100%;
+    }
+}
+
+/* ---------- Sehr schmale Geräte (kleine Smartphones) ---------- */
+@media (max-width: 420px) {
+    .app-nav .brand span {
+        display: none;
+    }
+    .app-nav-inner {
+        gap: 0.2rem;
+        padding: 0.35rem 0.5rem;
+    }
+    .nav-primary a,
+    .nav-secondary a,
+    .nav-scan {
+        padding-inline: 0.45rem;
+    }
+    .files-header h1 {
+        font-size: 1.05rem;
+    }
+    .context-toggle,
+    .album-toggle,
+    .view-switch button {
+        padding: 0.4rem 0.5rem;
+        font-size: 0.8rem;
+    }
+    .thumb-grid {
+        grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    }
+    .scan-pages-grid {
+        grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    }
+    .scan-page-card img {
+        height: 96px;
+    }
+}
+
+/* ---------- Querformat mit wenig Höhe ---------- */
+@media (max-height: 500px) and (orientation: landscape) {
+    .app-nav {
+        position: static;
+    }
+    .chat-messages {
+        min-height: 140px;
+        max-height: 45dvh;
+    }
+    .scan-camera video {
+        max-height: 60dvh;
+    }
+    .virtual-scroll {
+        max-height: calc(100dvh - 170px);
+        min-height: 150px;
+    }
+    .context-sidebar {
+        top: 0.5rem;
+    }
+}
+
+.scan-page-remove:hover {
+    background: var(--del-color, #c0392b);
+}
+
+/* Kategorien-Seite: Baum links, Dateiliste rechts (siehe categories.html/.js) */
+.category-tree-list {
+    list-style: none;
+    margin: 0;
+    padding-left: 0;
+}
+.category-tree-list .category-tree-list {
+    margin-left: 0.85rem;
+    border-left: 1px solid var(--pico-muted-border-color);
+    padding-left: 0.35rem;
+}
+.category-sidebar-header,
+.category-files-header,
+.category-action-row,
+.category-file-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.category-sidebar-header {
+    justify-content: space-between;
+}
+.category-icon-button {
+    min-width: 2rem;
+    width: 2rem;
+    padding-inline: 0;
+}
+.category-tree {
+    max-height: min(52dvh, 40rem);
+    overflow: auto;
+    margin-top: 0.65rem;
+}
+.category-tree-item.is-drag-over {
+    background: rgba(163, 113, 247, 0.2);
+    border-color: var(--pico-primary);
+}
+.category-tree-item {
+    border-radius: 6px;
+    font-size: 0.85rem;
+}
+.category-tree-row {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    min-width: 0;
+    padding: 0.2rem;
+}
+.category-tree-row:hover {
+    background: rgba(163, 113, 247, 0.1);
+}
+.category-expander,
+.category-expander-spacer {
+    flex: 0 0 1.4rem;
+    min-width: 1.4rem;
+    width: 1.4rem;
+    height: 1.4rem;
+    padding: 0;
+    line-height: 1;
+}
+.category-tree-select,
+.category-file-name {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+}
+.category-tree-select {
+    flex: 1;
+    overflow-wrap: break-word;
+}
+.category-edit-toggle {
+    flex: 0 0 auto;
+    width: 1.45rem;
+    height: 1.45rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--pico-muted-color);
+    font-size: 0.9rem;
+    line-height: 1;
+}
+.category-edit-toggle:hover,
+.category-edit-toggle:focus-visible {
+    color: var(--pico-primary);
+    background: rgba(163, 113, 247, 0.1);
+}
+.category-rename-input {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0.2rem 0.35rem;
+    font-size: 0.85rem;
+}
+.category-tree-item.is-selected > .category-tree-row .category-tree-select {
+    color: #d2a8ff;
+    font-weight: 600;
+}
+.category-tree-item.is-dragging,
+.category-file-row.is-dragging {
+    opacity: 0.45;
+}
+.category-inline-actions {
+    display: grid;
+    gap: 0.45rem;
+    margin: 0.25rem 0 0.5rem 1.8rem;
+    padding: 0.5rem;
+    border-left: 2px solid var(--pico-primary);
+    background: rgba(163, 113, 247, 0.06);
+    font-size: 0.82rem;
+}
+.category-inline-actions button,
+.category-inline-actions select {
+    width: 100%;
+    margin: 0;
+    font-size: 0.78rem;
+    padding: 0.35rem 0.5rem;
+}
+.category-inline-actions label {
+    display: grid;
+    gap: 0.2rem;
+    color: var(--pico-muted-color);
+}
+.category-file-actions select {
+    min-width: 0;
+    margin: 0;
+}
+.category-files-header {
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+}
+.category-files-header h2 {
+    margin-bottom: 0.1rem;
+}
+.category-file-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.category-file-actions select {
+    max-width: 15rem;
+}
+.category-file-select {
+    flex: 0 0 auto;
+    margin: 0;
+}
+.category-tree-count {
+    color: var(--pico-muted-color);
+    font-size: 0.72rem;
+    margin-left: 0.25rem;
+}
+.category-files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.category-file-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    border: 1px solid var(--pico-muted-border-color);
+    cursor: pointer;
+}
+.category-file-row:hover {
+    background: rgba(163, 113, 247, 0.1);
+}
+.category-file-icon {
+    flex: 0 0 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+}
+.category-file-icon img {
+    width: 28px;
+    height: 28px;
+    object-fit: cover;
+    border-radius: 4px;
+}
+.category-file-name {
+    flex: 1 1 auto;
+    overflow-wrap: break-word;
+    cursor: pointer;
+}
+
+@media (max-width: 768px) {
+    .category-tree {
+        max-height: 35dvh;
+    }
+    .category-files-header,
+    .category-file-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+    .category-file-actions select {
+        max-width: none;
+    }
+}

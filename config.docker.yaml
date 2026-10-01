@@ -1,0 +1,94 @@
+# Standard-Konfiguration für den Docker-Betrieb.
+# Wird beim Image-Build nach /app/config.yaml kopiert.
+# Alle Pfade sind containerinterne Pfade; die Zuordnung zu Host-Ordnern bzw.
+# Docker-Volumes steht in der docker-compose.yml.
+#
+# Normalerweise muss hier NICHTS angepasst werden. Änderungen an dieser Datei
+# werden über den WSL-Installer mit dem internen Compose-Stack übernommen.
+# Zum Abschalten einzelner Funktionen stattdessen die "Notfall-Schalter" in der
+# .env verwenden (siehe .env.example und README) – die wirken sofort.
+
+app:
+  host: "0.0.0.0"
+  port: 8080
+  debug: false
+  app_name: "JOLIA Docs"
+  auth_enabled: false
+
+paths:
+  inbox: "/data/inbox"
+  archive_root: "/data/source_documents"
+  data_dir: "/data/store"
+  temp_dir: "/data/store/temp"
+  backup_target: "/data/backup"
+
+models:
+  embedding_model: "bge-m3"
+  embedding_backend: "ollama"
+  embedding_device: "cpu"
+  embedding_ollama_model: "bge-m3"
+  ollama_base_url: "http://ollama:11434"
+  ollama_model: "qwen2.5:1.5b"
+  background_ollama_model: "qwen2.5:7b"
+  categorization_ollama_model: "qwen2.5:7b"
+  ollama_keep_alive: "10m"
+  vision_backend: "ollama"
+  vision_ollama_model: "qwen2.5vl:3b"
+  ffmpeg_binary: "ffmpeg"
+  # Audio-/Video-Transkription via openai-whisper (CPU)
+  whisper_python_model: "base"
+  # CLIP-Bildsuche: lokal gebackenes OpenCLIP-Modell (offline)
+  clip_backend: "openclip"
+  clip_model: "ViT-B-32"
+  clip_pretrained: "/app/data/models/ViT-B-32.pt"
+  clap_model: "laion/larger_clap_music"    # CLAP-Audio-/Musik-Embeddings; Lädt automatisch von HuggingFace Hub
+  # hf_endpoint: "https://hf-mirror.com"   # Nur setzen falls huggingface.co nicht erreichbar ist (Mirror)
+
+processing:
+  chunk_size: 1000
+  chunk_overlap: 150
+  max_file_size_mb: 2000
+  enable_ocr: true
+  enable_image_ocr: true
+  enable_audio_transcription: true
+  enable_video_transcription: true
+  enable_clip_embeddings: true
+  enable_clap_embeddings: true
+  enable_face_detection: true
+  # Nur die ersten N Sekunden transkribieren (0 = ganze Datei) -> schneller auf CPU
+  transcription_sample_seconds: 90
+  ocr_languages: "deu+eng"
+  ocr_confidence_threshold: 60
+  duplicate_hash_threshold: 8
+  duplicate_time_window_seconds: 120
+
+watcher:
+  # Automatischer Import aus der Inbox aktiviert -> einfach Dateien in den
+  # gemounteten Inbox-Ordner legen, sie werden automatisch verarbeitet.
+  enabled: true
+  scan_interval_seconds: 600
+  stability_threshold_seconds: 300
+
+scan:
+  bundle_enabled: true
+  bundle_idle_seconds: 45
+  bundle_max_pages: 100
+  pdf_ocr: true
+  pdf_dpi: 0
+  pdf_jpeg_quality: 85
+  vision_per_page: true
+  vision_max_pages: 0
+  keep_page_images_seconds: 0
+  default_title_prefix: "Scan"
+
+# Backup: je Lauf eine eigene ZIP-Datei (jolia_JJMMTTHHMM_backup.zip) im paths.backup_target.
+backup:
+  keep_min_backups: 1        # so viele neueste Backups werden bei Platzmangel nie gelöscht (0 = notfalls alle)
+  max_backups: 0             # harte Obergrenze der Anzahl aufbewahrter Backups (0 = unbegrenzt)
+  space_safety_factor: 1.15  # Sicherheitsaufschlag bei der Platzprüfung
+  compress: true             # false = schneller, dafür größere ZIPs
+  restart_after_restore: true
+
+scheduled_jobs:
+  clustering: { enabled: true, interval_seconds: 3600 }
+  backup: { enabled: true, interval_seconds: 86400 }

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Kategorien – JOLIA Docs{% endblock %}
+
+{% block content %}
+<div class="files-fullbleed">
+    <div class="files-header">
+        <h1>Kategorien</h1>
+        <span class="files-header-spacer"></span>
+    </div>
+
+    <div class="files-layout category-layout">
+        <aside class="context-sidebar">
+            <div class="category-sidebar-header">
+                <h2>Struktur</h2>
+                <button class="outline secondary category-icon-button" id="category-add-root-btn" type="button" title="Kategorie anlegen">+</button>
+            </div>
+            <input type="search" id="category-filter" placeholder="Kategorien durchsuchen" aria-label="Kategorien durchsuchen">
+            <div id="category-tree" class="category-tree" aria-label="Kategorien"><small>Lädt…</small></div>
+            <div id="category-edit-result"></div>
+        </aside>
+
+        <div class="files-main">
+            <div class="category-files-header">
+                <div>
+                    <h2 id="category-files-title">Kategorie auswählen</h2>
+                    <small id="category-files-subtitle"></small>
+                </div>
+                <div id="category-file-actions" class="category-file-actions" hidden>
+                    <span id="category-file-selection-count"></span>
+                    <select id="category-file-move-target" aria-label="Ausgewählte Dateien verschieben nach"></select>
+                    <button class="outline secondary" id="category-files-move-btn" type="button">Verschieben</button>
+                    <button class="outline secondary" id="category-files-remove-btn" type="button">Zuordnung entfernen</button>
+                </div>
+            </div>
+            <div id="category-files-list" class="category-files-list"><small>Bitte eine Kategorie auswählen…</small></div>
+        </div>
+    </div>
+</div>
+
+<dialog id="category-delete-dialog">
+    <article>
+        <header><strong>Ebene auflösen</strong></header>
+        <p id="category-delete-description"></p>
+        <footer>
+            <button class="secondary" id="category-delete-cancel-btn" type="button">Abbrechen</button>
+            <button id="category-delete-confirm-btn" type="button">Ebene auflösen</button>
+            <button class="outline" id="category-delete-subtree-btn" type="button">Diese und alle Unterebenen auflösen</button>
+        </footer>
+    </article>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/categories.js"></script>
+{% endblock %}

@@ -1,0 +1,59 @@
+# Python virtual environment
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Large model files
+data/models/
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+*.dat
+
+# Compiled Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+
+# Environment / secrets
+.env
+*.env
+config.yaml
+
+# Logs & temp
+*.log
+logs/
+tmp/
+temp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Node / PWA
+docscan-pwa/node_modules/
+docscan-pwa/dist/
+
+# ChromaDB local data
+chroma_data/
+chromadb/
+data/*.db
+data/*.db-*
+
+# Docker-Standarddatenordner (Inbox / Archiv / Backup)
+jolia/

@@ -1,0 +1,105 @@
+app:
+  host: "0.0.0.0"
+  port: 8080
+  debug: false
+  app_name: "JOLIA Docs"
+  # Phase E: Authentifizierung (deaktiviert = kein Login erforderlich)
+  auth_enabled: false
+  auth_username: "admin"
+  # SHA256-Hash des Passworts generieren:
+  #   python -c "import hashlib; print(hashlib.sha256(b'meinPasswort').hexdigest())"
+  auth_password_hash: ""
+  auth_session_secret: "aendere-diesen-wert-in-produktionsumgebung"
+
+paths:
+  inbox: "/mnt/fritzbox/inbox"
+  archive_root: "/home/docstore/source_documents"
+  data_dir: "/home/docstore/data"
+  temp_dir: "/home/docstore/data/temp"
+  backup_target: "/mnt/external_backup/jolia_backup"
+
+models:
+  embedding_model: "bge-m3"
+  embedding_backend: "ollama"  # "sentence-transformers" | "ollama"
+  embedding_ollama_model: "bge-m3"
+  embedding_device: "auto"                    # "auto" | "cpu" | "cuda" | "mps"
+  ollama_base_url: "http://localhost:11434"
+  ollama_model: "qwen2.5:1.5b"
+  background_ollama_model: "qwen2.5:7b"
+  categorization_ollama_model: "qwen2.5:7b"
+  # Wie lange Ollama Modelle nach der letzten Anfrage im (V)RAM hält, bevor sie
+  # automatisch entladen werden (Ollama-Format: "10m", "1h", "0" = sofort entladen).
+  # Modelle werden dadurch NICHT beim Start von JOLIA geladen, sondern erst bei
+  # der ersten Chat-/Import-Anfrage - und nach Leerlauf wieder freigegeben.
+  ollama_keep_alive: "10m"
+  # Leerlaufzeit (Minuten) bis lokal im JOLIA-Prozess geladene Modelle
+  # (SentenceTransformer/OpenCLIP/CLAP) wieder entladen werden.
+  model_idle_unload_minutes: 10.0
+  whisper_cpp_binary: ""
+  whisper_model_path: ""
+  ffmpeg_binary: "ffmpeg"
+  # Phase B: OpenCLIP (Bild-Ähnlichkeitssuche)
+  clip_model: "ViT-B-32"
+  clip_pretrained: "openai"
+  # CLAP (Audio-/Musik-Ähnlichkeitssuche, Text→Musik-Suche); lädt automatisch von HuggingFace Hub
+  clap_model: "laion/larger_clap_music"
+  # Nur setzen falls huggingface.co nicht erreichbar ist (z.B. gesperrtes Netzwerk):
+  # hf_endpoint: "https://hf-mirror.com"
+
+processing:
+  chunk_size: 1000
+  chunk_overlap: 150
+  max_file_size_mb: 2000
+  enable_ocr: true
+  enable_audio_transcription: false
+  enable_video_transcription: false
+  enable_image_ocr: true
+  ocr_languages: "deu+eng"
+  ocr_confidence_threshold: 60
+  video_thumbnail_offset_pct: 10
+  # Phase B: Erweiterte Bild-Features (erfordert optionale Pakete)
+  enable_clip_embeddings: false    # open-clip-torch erforderlich
+  enable_clap_embeddings: false    # transformers + librosa erforderlich
+  enable_face_detection: false     # face-recognition + scikit-learn erforderlich
+  duplicate_hash_threshold: 8       # pHash-Hammingdistanz: kleiner = strenger
+  duplicate_time_window_seconds: 120
+
+watcher:
+  enabled: false
+  scan_interval_seconds: 600
+  # Mindest-Ruhezeit (Sekunden) einer Datei bevor sie importiert wird.
+  # Verhindert, dass Dateien importiert werden, die noch kopiert werden.
+  stability_threshold_seconds: 300
+
+# Mehrseitige Scans: Einzelbilder aus der Scan-App werden zu EINEM PDF mit
+# durchsuchbarem Textlayer zusammengefasst. Gilt fuer Live-Kamera, Kamera-App
+# und externe Apps, die Seiten nach der Konvention {bundle_id}_{NN}.jpg ablegen.
+scan:
+  bundle_enabled: true
+  # Ohne Manifest: Wartezeit nach der letzten Seite, bevor gebuendelt wird.
+  bundle_idle_seconds: 45
+  bundle_max_pages: 100
+  # Tesseract-Textlayer einbetten (Text im PDF markierbar). Benoetigt Tesseract.
+  pdf_ocr: true
+  # DPI fuer die PDF-Seitengroesse. 0 = automatisch aus der Bildgroesse (Seite ~ A4).
+  pdf_dpi: 0
+  pdf_jpeg_quality: 85
+  # Zusaetzliche Ollama-Vision-Analyse pro Seite (Bildinhalte, Handschrift).
+  vision_per_page: true
+  # 0 = alle Seiten analysieren (auf reiner CPU sehr langsam).
+  vision_max_pages: 0
+  # >0 = Seitenbilder nach der Verarbeitung noch N Sekunden im temp_dir aufheben.
+  keep_page_images_seconds: 0
+  default_title_prefix: "Scan"
+
+# Backup: je Lauf eine eigene ZIP-Datei (jolia_JJMMTTHHMM_backup.zip) im paths.backup_target.
+backup:
+  keep_min_backups: 1        # so viele neueste Backups werden bei Platzmangel nie gelöscht (0 = notfalls alle)
+  max_backups: 0             # harte Obergrenze der Anzahl aufbewahrter Backups (0 = unbegrenzt)
+  space_safety_factor: 1.15  # Sicherheitsaufschlag bei der Platzprüfung
+  compress: true             # false = schneller, dafür größere ZIPs
+  restart_after_restore: true
+
+scheduled_jobs:
+  clustering: { enabled: true, interval_seconds: 3600 }
+  backup: { enabled: true, interval_seconds: 86400 }

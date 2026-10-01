@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ file.original_filename }} – JOLIA Docs{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+    <ul>
+        <li><a href="/files">Dateien</a></li>
+        <li>{{ file.original_filename }}</li>
+    </ul>
+</nav>
+
+<div class="file-detail-content">
+{% include "_file_detail_content.html" %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% include "_file_detail_scripts.html" %}
+{% endblock %}
+

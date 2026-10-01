@@ -1,0 +1,19 @@
+# Build-Kontext schlank halten
+.venv
+venv
+data
+jolia
+docscan-pwa
+.git
+.gitignore
+tests
+**/__pycache__
+*.pyc
+*.pyo
+*.log
+*.md
+config.yaml
+config.windows.yaml
+config.linux.yaml
+.env
+.env.*
