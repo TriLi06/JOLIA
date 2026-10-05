@@ -95,17 +95,47 @@ internal static class JoliaSetupLauncher
             }
         }
 
+        // "-File" startet eine .ps1-Datei und wird von der PowerShell-Ausfuehrungsrichtlinie
+        // blockiert, sobald diese per Gruppenrichtlinie ("Turn on Script Execution") auf
+        // "Disabled"/Restricted erzwungen ist - in diesem Fall hat die Richtlinie Vorrang vor
+        // "-ExecutionPolicy Bypass" auf der Kommandozeile. Stattdessen wird der Skriptinhalt
+        // als Text geladen und per Invoke-Expression ausgefuehrt: das faellt unter "einzelne
+        // Befehle", die auch von "Restricted" erlaubt bleiben, und startet JOLIA_setup.exe
+        // daher auch auf Rechnern mit gesperrter Skriptausfuehrung.
+        string command = "$JoliaScriptPath = '" + scriptPath.Replace("'", "''") + "'; Get-Content -LiteralPath $JoliaScriptPath -Raw | Invoke-Expression";
+        string encodedCommand = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(command));
+
+        // WSL_startup.ps1 erkennt fehlende Adminrechte normalerweise selbst und startet
+        // sich dann per "-File `"$PSCommandPath`"" neu (Selbst-Elevation). $PSCommandPath
+        // ist aber leer, wenn das Skript - wie hier - per Invoke-Expression statt als
+        // Datei ausgefuehrt wird; die Selbst-Elevation wuerde dadurch fehlschlagen.
+        // Deshalb wird hier direkt per "runas" elevated, bevor PowerShell ueberhaupt
+        // startet: WSL_startup.ps1 sieht sich dann schon als Administrator und ueberspringt
+        // seine eigene Selbst-Elevation vollstaendig.
         ProcessStartInfo startInfo = new ProcessStartInfo
         {
             FileName = "powershell.exe",
-            Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + scriptPath + "\"",
+            Arguments = "-NoProfile -ExecutionPolicy Bypass -EncodedCommand " + encodedCommand,
             WorkingDirectory = Path.GetDirectoryName(scriptPath),
-            UseShellExecute = true
+            UseShellExecute = true,
+            Verb = "runas"
         };
 
         try
         {
             Process.Start(startInfo);
+        }
+        catch (System.ComponentModel.Win32Exception win32Exception)
+        {
+            // Fehlercode 1223 = ERROR_CANCELLED: der Benutzer hat die UAC-Rechteanfrage abgelehnt.
+            if (win32Exception.NativeErrorCode == 1223)
+            {
+                MessageBox.Show("JOLIA benoetigt Administratorrechte. Der Start wurde abgebrochen, weil die Rechteanfrage (UAC) abgelehnt wurde.", "JOLIA Setup", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            else
+            {
+                MessageBox.Show(win32Exception.Message, "JOLIA Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
         catch (Exception exception)
         {

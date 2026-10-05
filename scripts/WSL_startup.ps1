@@ -15,8 +15,18 @@
 # Verarbeitung/Indexierung nicht durch SMB-Latenz ausgebremst wird.
 #
 # Rückstandsfreie Deinstallation: Menüoption 4
+# LAN-Zugriff klappt nicht? Schrittweise Diagnose: Menüoption 7
 
 $ErrorActionPreference = "Stop"
+
+# Wird von JOLIA_setup.exe per "$JoliaScriptPath='...'; ..." vor dem eigentlichen
+# Skriptinhalt gesetzt, wenn dieser per "Get-Content | Invoke-Expression" statt
+# "-File" gestartet wurde (Workaround fuer per Gruppenrichtlinie gesperrte
+# PowerShell-Skriptausfuehrung, siehe Selbst-Elevation weiter unten). In diesem
+# Fall ist $PSCommandPath leer, da PowerShell kein echtes Skript "ausfuehrt".
+# Wird das Skript stattdessen klassisch per "-File" gestartet (z.B. direkt per
+# Doppelklick), ist $JoliaScriptPath nicht gesetzt und $PSCommandPath greift wie gewohnt.
+if (-not $JoliaScriptPath) { $JoliaScriptPath = $PSCommandPath }
 
 # ── Konfiguration ───────────────────────────────────────────────────────────
 $DistroName  = "jolia-wsl"
@@ -309,6 +319,17 @@ function Show-JoliaStatus {
     } catch {
         Write-Warn2 "LAN-Firewallregel konnte nicht geprueft werden: $($_.Exception.Message)"
     }
+    try {
+        $winRule = Get-NetFirewallRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
+        if ($null -ne $winRule -and $winRule.Enabled) {
+            Write-Ok "LAN-Zugriff: Windows-Firewallregel '$FirewallRuleName' ist aktiv (Port $AppPort)."
+        } else {
+            Write-Warn2 "LAN-Zugriff: Windows-Firewallregel '$FirewallRuleName' fehlt oder ist deaktiviert. Mit Option 1 reparieren."
+        }
+    } catch {
+        Write-Warn2 "Windows-Firewallregel konnte nicht geprueft werden: $($_.Exception.Message)"
+    }
+    Write-Host "Ausfuehrliche LAN-Diagnose: Menüoption 7" -ForegroundColor DarkGray
 }
 
 # Aktualisiert den JOLIA-Checkout robust, auch wenn lokal etwas veraendert wurde
@@ -410,6 +431,20 @@ function Update-Jolia {
         return
     }
     Write-Ok "JOLIA wurde aktualisiert und gestartet. Der Autostart wurde nicht verändert."
+    Show-JoliaAccessUrls -Distro $DistroName
+}
+
+# Gibt die Adressen aus, unter denen JOLIA erreichbar ist (lokal und, falls
+# ermittelbar, aus dem Heimnetz via Mirrored Networking). Wird nach Installation
+# und nach jedem Update aufgerufen.
+function Show-JoliaAccessUrls ($Distro) {
+    Write-Host "JOLIA Docs: http://localhost:$AppPort" -ForegroundColor Green
+    try {
+        $lanIp = (wsl -d $Distro hostname -I).Trim().Split(" ")[0]
+        if (-not [string]::IsNullOrWhiteSpace($lanIp)) {
+            Write-Host "Aus dem Heimnetz (Mirrored Networking): http://${lanIp}:$AppPort" -ForegroundColor Green
+        }
+    } catch { }
 }
 
 # Setzt/aktualisiert einen einzelnen Schluessel in der .env-Datei der App (idempotent).
@@ -572,7 +607,14 @@ function Set-WslGlobalNetworkingMode {
 # getrennt von der normalen Windows-Firewall). Ohne diese Regel bleibt JOLIA trotz
 # Mirrored Networking nur ueber localhost erreichbar, da die Hyper-V-Firewall
 # eingehende Verbindungen von anderen LAN-Geraeten standardmaessig blockt.
-# Idempotent: eine vorhandene Regel wird aktualisiert statt dupliziert.
+# Zusaetzlich wird (idempotent) eine ganz normale Windows Defender Firewall-Regel
+# angelegt: unter Mirrored Networking kommt der Traffic aus dem LAN ueber den
+# echten physischen Netzwerkadapter des Windows-Hosts an, und kann daher auch
+# von der regulaeren Host-Firewall (nicht nur der Hyper-V-Firewall) blockiert
+# werden. Die Regel wird bewusst nur fuer die Profile "Private" und "Domain"
+# angelegt (nicht "Public"), damit JOLIA nicht versehentlich in unsicheren
+# Netzwerken (Hotel-WLAN etc.) erreichbar wird.
+# Beide Regeln sind idempotent: eine vorhandene Regel wird aktualisiert statt dupliziert.
 function Set-JoliaFirewallRule {
     try {
         $vmCreator = Get-NetFirewallHyperVVMCreator -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -eq "WSL" } | Select-Object -First 1
@@ -590,6 +632,174 @@ function Set-JoliaFirewallRule {
         Write-Warn2 "Hyper-V-Firewallregel fuer Port $AppPort konnte nicht angelegt werden: $($_.Exception.Message)"
         Write-Warn2 "JOLIA bleibt dadurch moeglicherweise nur ueber localhost erreichbar (nicht aus dem Heimnetz)."
     }
+
+    try {
+        $existingWinRule = Get-NetFirewallRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
+        if ($null -ne $existingWinRule) {
+            $existingWinRule | Set-NetFirewallRule -Enabled True -Action Allow -Direction Inbound -Protocol TCP -LocalPort $AppPort -Profile Private, Domain
+            Write-Ok "Windows-Firewallregel '$FirewallRuleName' aktualisiert (Port $AppPort, Profile Private/Domain)."
+        } else {
+            New-NetFirewallRule -DisplayName $FirewallRuleName -Direction Inbound -Protocol TCP -LocalPort $AppPort -Action Allow -Profile Private, Domain | Out-Null
+            Write-Ok "Windows-Firewallregel '$FirewallRuleName' angelegt (Port $AppPort, Profile Private/Domain)."
+        }
+    } catch {
+        Write-Warn2 "Windows-Firewallregel fuer Port $AppPort konnte nicht angelegt werden: $($_.Exception.Message)"
+    }
+
+    try {
+        $publicProfiles = Get-NetConnectionProfile -ErrorAction SilentlyContinue | Where-Object { $_.NetworkCategory -eq "Public" }
+        if ($publicProfiles) {
+            Write-Warn2 "Mindestens eine aktive Netzwerkverbindung ist als 'Oeffentlich' eingestuft: $($publicProfiles.InterfaceAlias -join ', ')"
+            Write-Warn2 "Die neue Windows-Firewallregel gilt dort bewusst NICHT, JOLIA bleibt in oeffentlichen Netzen gesperrt. Falls es sich tatsaechlich um dein privates Heimnetz handelt, kannst du es umstellen mit:"
+            Write-Warn2 "  Set-NetConnectionProfile -InterfaceAlias '$($publicProfiles[0].InterfaceAlias)' -NetworkCategory Private"
+        }
+    } catch { }
+}
+
+# Prueft Schritt fuer Schritt, warum JOLIA (noch) nicht aus dem LAN erreichbar
+# ist, und gibt zu jedem Punkt eine klare OK/WARN-Meldung samt Reparaturhinweis
+# aus. Deckt alle bekannten Blocker ab: Networking-Modus, lokale Erreichbarkeit,
+# Hyper-V-Firewall (Regel + globale VM-Policy), normale Windows-Firewall,
+# Netzwerkprofil (Privat/Oeffentlich) und optional einen echten Verbindungstest
+# von einem zweiten Geraet.
+function Test-JoliaLanAccess {
+    Write-Host "=== JOLIA LAN-Zugriffs-Diagnose ===" -ForegroundColor Cyan
+
+    $distros = (wsl -l -q) -replace "`0", ""
+    if ($distros -notcontains $DistroName) {
+        Write-Fail "WSL-Distro '$DistroName' ist nicht installiert. Verwende zuerst Option 1."
+        return
+    }
+
+    # 1. Networking-Modus
+    $configPath = Join-Path $env:USERPROFILE ".wslconfig"
+    $mirroredActive = $false
+    if (Test-Path $configPath) {
+        $content = [System.IO.File]::ReadAllText($configPath)
+        if ($content -match "(?m)^\s*networkingMode\s*=\s*mirrored\s*$") {
+            $mirroredActive = $true
+        }
+    }
+    if ($mirroredActive) {
+        Write-Ok "Mirrored Networking ist in $configPath konfiguriert."
+    } else {
+        Write-Fail "Mirrored Networking ist NICHT in $configPath konfiguriert. Ohne dieses ist LAN-Zugriff grundsaetzlich nicht moeglich. Mit Option 1 reparieren."
+        return
+    }
+
+    # 2. Tatsaechliche IP-Adressen vergleichen (erkennt den Fall, dass .wslconfig
+    #    zwar korrekt ist, aber seit der letzten Aenderung kein "wsl --shutdown"
+    #    mehr lief und die Distro daher noch im alten NAT-Modus laeuft).
+    $wslIp = ((wsl -d $DistroName hostname -I) -join " ").Trim().Split(" ")[0]
+    $hostIps = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.InterfaceAlias -notmatch "Loopback|vEthernet \(WSL" } |
+        Select-Object -ExpandProperty IPAddress)
+    if ([string]::IsNullOrWhiteSpace($wslIp)) {
+        Write-Fail "Konnte keine IP-Adresse der Distro ermitteln ('wsl hostname -I' lieferte nichts)."
+    } elseif ($hostIps -contains $wslIp) {
+        Write-Ok "Mirrored Networking ist aktiv: WSL nutzt dieselbe LAN-IP wie Windows ($wslIp)."
+    } else {
+        Write-Fail "WSL-IP ($wslIp) stimmt mit keiner Windows-Host-IP ueberein - die Distro laeuft vermutlich noch im alten NAT-Modus."
+        Write-Warn2 "Abhilfe: 'wsl --shutdown' ausfuehren (schliesst alle WSL-Fenster) und JOLIA danach neu starten."
+    }
+
+    # 3. Lokale Erreichbarkeit (Windows-Host -> App)
+    $localOk = $false
+    try {
+        $response = Invoke-WebRequest -Uri "http://localhost:$AppPort/health" -UseBasicParsing -TimeoutSec 5
+        Write-Ok "JOLIA antwortet lokal unter http://localhost:$AppPort (HTTP $($response.StatusCode))."
+        $localOk = $true
+    } catch {
+        Write-Fail "JOLIA antwortet nicht einmal lokal unter http://localhost:$AppPort. Pruefe mit Option 5/Docker, ob der Container laeuft, bevor du LAN-Zugriff testest."
+    }
+
+    # 4. Erreichbarkeit ueber die LAN-IP, aber noch vom selben Windows-Host aus.
+    #    Das grenzt "App bindet falsch" von "nur die Firewall blockiert externe
+    #    Verbindungen" sauber voneinander ab.
+    if ($localOk -and -not [string]::IsNullOrWhiteSpace($wslIp)) {
+        try {
+            $response = Invoke-WebRequest -Uri "http://${wslIp}:$AppPort/health" -UseBasicParsing -TimeoutSec 5
+            Write-Ok "JOLIA antwortet unter der LAN-IP http://${wslIp}:$AppPort (HTTP $($response.StatusCode)) - vom Windows-Host aus getestet."
+        } catch {
+            Write-Fail "JOLIA antwortet lokal, aber NICHT unter der LAN-IP http://${wslIp}:$AppPort - selbst vom Windows-Host aus. Das deutet auf ein Firewall-Problem auf diesem Rechner hin (siehe naechste Punkte)."
+        }
+    }
+
+    # 5. Hyper-V-Firewallregel (Port-spezifisch)
+    try {
+        $hvRule = Get-NetFirewallHyperVRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
+        if ($null -ne $hvRule -and $hvRule.Enabled -and $hvRule.Action -eq "Allow") {
+            Write-Ok "Hyper-V-Firewallregel '$FirewallRuleName' ist aktiv und erlaubt Port $AppPort."
+        } else {
+            Write-Fail "Hyper-V-Firewallregel '$FirewallRuleName' fehlt, ist deaktiviert oder blockiert. Mit Option 1 reparieren."
+        }
+    } catch {
+        Write-Warn2 "Hyper-V-Firewallregel konnte nicht geprueft werden: $($_.Exception.Message)"
+    }
+
+    # 6. Globale Hyper-V-VM-Firewallpolicy - kann eine an sich korrekte
+    #    Einzelregel trotzdem uebersteuern, wenn hier z.B. per GPO/Drittsoftware
+    #    "Block" erzwungen wird.
+    try {
+        $vmCreator = Get-NetFirewallHyperVVMCreator -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -eq "WSL" } | Select-Object -First 1
+        $vmCreatorId = if ($vmCreator) { $vmCreator.VMCreatorId } else { "{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}" }
+        $vmSetting = Get-NetFirewallHyperVVMSetting -PolicyStore ActiveStore -Name $vmCreatorId -ErrorAction SilentlyContinue
+        if ($null -ne $vmSetting) {
+            if ($vmSetting.DefaultInboundAction -eq "Block" ) {
+                Write-Warn2 "Hyper-V-Firewall Standardrichtlinie fuer eingehenden Traffic ist 'Block' - das ist normal und wird durch die gezielte Regel oben bereits ausgeglichen. Nur relevant, falls die gezielte Regel oben fehlschlaegt."
+            } else {
+                Write-Ok "Hyper-V-Firewall Standardrichtlinie fuer eingehenden Traffic: $($vmSetting.DefaultInboundAction)."
+            }
+        }
+    } catch {
+        Write-Warn2 "Globale Hyper-V-VM-Firewallpolicy konnte nicht geprueft werden (nicht kritisch): $($_.Exception.Message)"
+    }
+
+    # 7. Normale Windows Defender Firewall (zusaetzliche Schicht unter Mirrored
+    #    Networking, siehe Set-JoliaFirewallRule).
+    try {
+        $winRule = Get-NetFirewallRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
+        if ($null -ne $winRule -and $winRule.Enabled -and $winRule.Action -eq "Allow") {
+            Write-Ok "Windows-Firewallregel '$FirewallRuleName' ist aktiv und erlaubt Port $AppPort."
+        } else {
+            Write-Fail "Windows-Firewallregel '$FirewallRuleName' fehlt oder ist deaktiviert. Mit Option 1 reparieren."
+        }
+    } catch {
+        Write-Warn2 "Windows-Firewallregel konnte nicht geprueft werden: $($_.Exception.Message)"
+    }
+
+    # 8. Netzwerkprofil - unsere Windows-Firewallregel gilt bewusst nur fuer
+    #    Private/Domain, nicht Public.
+    try {
+        $profiles = Get-NetConnectionProfile -ErrorAction SilentlyContinue
+        foreach ($p in $profiles) {
+            if ($p.NetworkCategory -eq "Public") {
+                Write-Fail "Netzwerkprofil von '$($p.InterfaceAlias)' ist 'Oeffentlich'. Die Windows-Firewallregel gilt dort NICHT (Sicherheitsabsicht). Falls dies dein Heimnetz ist: Set-NetConnectionProfile -InterfaceAlias '$($p.InterfaceAlias)' -NetworkCategory Private"
+            } else {
+                Write-Ok "Netzwerkprofil von '$($p.InterfaceAlias)': $($p.NetworkCategory)."
+            }
+        }
+        if (-not $profiles) {
+            Write-Warn2 "Konnte aktive Netzwerkprofile nicht ermitteln."
+        }
+    } catch {
+        Write-Warn2 "Netzwerkprofil konnte nicht geprueft werden: $($_.Exception.Message)"
+    }
+
+    # 9. Hinweis auf weitere moegliche Blocker ausserhalb dieses Skripts.
+    Write-Host ""
+    Write-Host "Falls alle obigen Punkte OK sind und es trotzdem nicht klappt, kommt die Blockade" -ForegroundColor DarkGray
+    Write-Host "erfahrungsgemaess von einer dieser Stellen (ausserhalb der Kontrolle dieses Skripts):" -ForegroundColor DarkGray
+    Write-Host "  - Drittanbieter-Antivirus/Firewall (z.B. Kaspersky, Norton, Avast) mit eigenem Netzwerkschutz" -ForegroundColor DarkGray
+    Write-Host "  - Client-/AP-Isolation im WLAN-Router (verhindert Geraete-zu-Geraete-Kommunikation im selben WLAN)" -ForegroundColor DarkGray
+    Write-Host "  - Das andere Geraet ist in einem Gast-WLAN oder einer separaten VLAN-/IoT-Zone" -ForegroundColor DarkGray
+    Write-Host "  - Firmen-/Schul-Notebook mit zentral verwalteter Firewall-Policy (GPO/Intune)" -ForegroundColor DarkGray
+    Write-Host ""
+
+    if (-not [string]::IsNullOrWhiteSpace($wslIp)) {
+        Write-Step "Teste jetzt von einem ANDEREN Geraet im selben Netzwerk im Browser:"
+        Write-Host "  http://${wslIp}:$AppPort" -ForegroundColor Green
+    }
 }
 
 function Invoke-JoliaUninstall {
@@ -604,11 +814,12 @@ function Invoke-JoliaUninstall {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
     Write-Host "  erledigt." -ForegroundColor Green
 
-    Write-Host "Entferne LAN-Firewallregel..." -ForegroundColor Yellow
+    Write-Host "Entferne LAN-Firewallregeln..." -ForegroundColor Yellow
     $firewallRule = Get-NetFirewallHyperVRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
     if ($null -ne $firewallRule) {
         Remove-NetFirewallHyperVRule -Name $firewallRule.Name -ErrorAction SilentlyContinue
     }
+    Remove-NetFirewallRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
     Write-Host "  erledigt." -ForegroundColor Green
 
     $existingDistros = (wsl -l -q) -replace "`0", ""
@@ -645,7 +856,19 @@ function Invoke-JoliaUninstall {
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Starte Skript mit Administratorrechten neu..." -ForegroundColor Yellow
-    Start-Process powershell.exe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`"") -Verb RunAs
+    if ($JoliaScriptPath) {
+        # "Get-Content | Invoke-Expression" statt "-File": laedt den Skriptinhalt als
+        # Text und fuehrt ihn aus, statt eine .ps1-Datei zu oeffnen. Die PowerShell-
+        # Ausfuehrungsrichtlinie (auch per Gruppenrichtlinie auf "Restricted" erzwungen)
+        # blockiert gezielt das Ausfuehren von Skriptdateien, nicht aber dynamisch per
+        # Invoke-Expression ausgefuehrten Code. Dadurch startet JOLIA_setup.exe auch auf
+        # Rechnern, auf denen die PowerShell-Skriptausfuehrung per Richtlinie gesperrt ist.
+        $elevateCommand = '$JoliaScriptPath = ' + "'" + ($JoliaScriptPath -replace "'", "''") + "'" + '; Get-Content -LiteralPath $JoliaScriptPath -Raw | Invoke-Expression'
+        $encodedElevateCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($elevateCommand))
+        Start-Process powershell.exe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encodedElevateCommand) -Verb RunAs
+    } else {
+        Start-Process powershell.exe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`"") -Verb RunAs
+    }
     exit 0
 }
 
@@ -687,7 +910,8 @@ Write-Host "  3: Autostart aktivieren/deaktivieren (Installation bleibt erhalten
 Write-Host "  4: JOLIA vollständig deinstallieren"
 Write-Host "  5: Status prüfen"
 Write-Host "  6: FRITZ!Box-Zugang oder lokalen Speicherordner ändern"
-$choice = Read-Host "Bitte Auswahl eingeben (1-6)"
+Write-Host "  7: LAN-Zugriff testen/diagnostizieren (warum ist JOLIA im Heimnetz nicht erreichbar?)"
+$choice = Read-Host "Bitte Auswahl eingeben (1-7)"
 
 switch ($choice) {
     "1" {
@@ -736,6 +960,11 @@ switch ($choice) {
     }
     "6" {
         Set-JoliaStorage
+        Read-Host "`nDruecke Enter zum Schliessen"
+        exit 0
+    }
+    "7" {
+        Test-JoliaLanAccess
         Read-Host "`nDruecke Enter zum Schliessen"
         exit 0
     }
@@ -1052,13 +1281,8 @@ Save-JoliaStorageSettings
 
 Write-Host ""
 Write-Host "=== Fertig ===" -ForegroundColor Cyan
-Write-Host "JOLIA Docs: http://localhost:$AppPort" -ForegroundColor Green
-try {
-    $lanIp = (wsl -d $DistroName hostname -I).Trim().Split(" ")[0]
-    if (-not [string]::IsNullOrWhiteSpace($lanIp)) {
-        Write-Host "Aus dem Heimnetz (Mirrored Networking): http://${lanIp}:$AppPort" -ForegroundColor Green
-    }
-} catch { }
+Show-JoliaAccessUrls -Distro $DistroName
 Write-Host "Upload: FRITZ!NAS $FritzNasUploadMount  |  Archiv: WSL $ArchiveLinux  |  Backup: FRITZ!NAS $FritzNasBackupMount" -ForegroundColor DarkGray
+Write-Host "LAN-Zugriff klappt nicht? Diagnose: Menüoption 7" -ForegroundColor DarkGray
 Write-Host "Deinstallation (rückstandsfrei): Menüoption 4" -ForegroundColor DarkGray
 Read-Host "`nDruecke Enter zum Schliessen"
