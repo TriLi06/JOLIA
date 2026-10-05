@@ -49,6 +49,7 @@ $LocalStorageRoot    = ""
 # 8080 kollidiert auf manchen Firmenrechnern mit lokal installierter Sicherheits-/Proxy-Software,
 # die denselben Port auf dem Windows-Host belegt (Antwort dann "Embedthis-http" statt JOLIA).
 $AppPort     = 8090
+$FirewallRuleName = "JOLIA-WSL-Port-$AppPort"
 $TaskName    = "JOLIA-WSL-Autostart"
 # Offizielle Ubuntu-WSL-Rootfs-Tarballs (für "wsl --import", kein Store-Ubuntu,
 # daher keine interaktive Ersteinrichtung nötig). Erste erreichbare URL gewinnt.
@@ -298,6 +299,79 @@ function Show-JoliaStatus {
     } catch {
         Write-Warn2 "JOLIA antwortet derzeit nicht unter http://localhost:$AppPort."
     }
+    try {
+        $rule = Get-NetFirewallHyperVRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
+        if ($null -ne $rule -and $rule.Enabled) {
+            Write-Ok "LAN-Zugriff: Hyper-V-Firewallregel '$FirewallRuleName' ist aktiv (Port $AppPort)."
+        } else {
+            Write-Warn2 "LAN-Zugriff: Hyper-V-Firewallregel '$FirewallRuleName' fehlt oder ist deaktiviert. Andere Geräte im Heimnetz koennen JOLIA dann nicht erreichen. Mit Option 1 reparieren."
+        }
+    } catch {
+        Write-Warn2 "LAN-Firewallregel konnte nicht geprueft werden: $($_.Exception.Message)"
+    }
+}
+
+# Aktualisiert den JOLIA-Checkout robust, auch wenn lokal etwas veraendert wurde
+# (z.B. durch die App selbst oder manuelle Eingriffe). Ein einfaches "git pull"
+# schlaegt in diesem Fall mit "local changes would be overwritten by merge" fehl
+# und blockiert dann jedes weitere Update. Lokale Aenderungen werden deshalb
+# zuerst per "git stash" gesichert (NICHT verworfen) und als Datei-Liste an den
+# Aufrufer zurueckgemeldet, bevor per "git reset --hard" zuverlaessig auf den
+# aktuellen Remote-Stand gewechselt wird. Existiert noch kein Checkout, wird
+# frisch geklont. Gibt $true bei Erfolg zurueck, $false bei einem echten Fehler
+# (z.B. Netzwerk/Repo nicht erreichbar).
+function Sync-JoliaRepo ($Distro, $AppDir, $Repo) {
+    $bashScript = @'
+set -e
+APPDIR="__APPDIR__"
+REPO="__REPO__"
+if [ ! -d "$APPDIR/.git" ]; then
+    mkdir -p "$APPDIR"
+    git clone "$REPO" "$APPDIR"
+    echo "JOLIA_GIT_RESULT:CLONED"
+    exit 0
+fi
+cd "$APPDIR"
+git config --global --add safe.directory "$APPDIR" >/dev/null 2>&1 || true
+git fetch origin --quiet
+BRANCH=$(git symbolic-ref --short -q HEAD)
+if [ -z "$BRANCH" ]; then BRANCH=main; fi
+STATUS=$(git status --porcelain)
+if [ -n "$STATUS" ]; then
+    CHANGED=$(echo "$STATUS" | awk '{print $2}' | tr '\n' ';')
+    STASHMSG="jolia-auto-update-$(date +%Y%m%d-%H%M%S)"
+    git stash push -u -m "$STASHMSG" >/dev/null 2>&1
+    echo "JOLIA_GIT_STASHED:$STASHMSG:$CHANGED"
+fi
+git reset --hard "origin/$BRANCH" --quiet
+echo "JOLIA_GIT_RESULT:OK:$BRANCH"
+'@
+    $bashScript = $bashScript.Replace("__APPDIR__", $AppDir).Replace("__REPO__", $Repo)
+    $bashScript = $bashScript -replace "`r", ""
+    $scriptB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($bashScript))
+    $output = wsl -d $Distro -u root -- bash -c "echo $scriptB64 | base64 -d | bash"
+    $exitCode = $LASTEXITCODE
+
+    $stashLine = $output | Where-Object { $_ -like "JOLIA_GIT_STASHED:*" }
+    if ($stashLine) {
+        $parts = $stashLine -split ":", 3
+        $stashMsg = $parts[1]
+        $changedFiles = @()
+        if ($parts.Count -ge 3) { $changedFiles = ($parts[2] -split ";") | Where-Object { $_ -ne "" } }
+        Write-Warn2 "Lokale Aenderungen am JOLIA-Code gefunden - diese wurden NICHT ueberschrieben, sondern vorher gesichert (git stash '$stashMsg')."
+        if ($changedFiles.Count -gt 0) {
+            Write-Warn2 ("Betroffene Dateien: " + ($changedFiles -join ", "))
+        }
+        Write-Warn2 "Pruefen/wiederherstellen in der Distro mit: wsl -d $Distro -u root -- bash -c `"cd $AppDir && git stash list`""
+    }
+
+    $resultLine = $output | Where-Object { $_ -like "JOLIA_GIT_RESULT:*" }
+    if ($exitCode -ne 0 -or -not $resultLine) {
+        Write-Fail "Git-Synchronisierung fehlgeschlagen."
+        if ($output) { $output | ForEach-Object { Write-Host $_ } }
+        return $false
+    }
+    return $true
 }
 
 function Update-Jolia {
@@ -306,20 +380,13 @@ function Update-Jolia {
         Write-Fail "JOLIA ist nicht installiert. Verwende zuerst Option 1."
         return
     }
-    $appExists = wsl -d $DistroName -u root -- bash -c "test -d $AppDirLinux/.git && echo yes || echo no"
-    if ($appExists.Trim() -ne "yes") {
-        Write-Fail "Das JOLIA-Repository wurde in der Distro nicht gefunden. Verwende Option 1 zur Reparatur."
-        return
-    }
     if (-not (Confirm-JoliaNoncommercialLicense)) {
         return
     }
 
     Write-Warn2 "Vor Updates wird ein aktuelles JOLIA-Backup empfohlen (Einstellungen > Backups)."
     Write-Step "Lade JOLIA-Updates..."
-    wsl -d $DistroName -u root -- bash -c "cd $AppDirLinux && git pull"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Git-Pull fehlgeschlagen."
+    if (-not (Sync-JoliaRepo -Distro $DistroName -AppDir $AppDirLinux -Repo $RepoUrl)) {
         return
     }
     if ($StorageMode -eq "FritzNas") {
@@ -501,6 +568,30 @@ function Set-WslGlobalNetworkingMode {
     return $changed
 }
 
+# Oeffnet $AppPort in der Hyper-V-Firewall (eigene Firewallschicht fuer VM-/WSL-Traffic,
+# getrennt von der normalen Windows-Firewall). Ohne diese Regel bleibt JOLIA trotz
+# Mirrored Networking nur ueber localhost erreichbar, da die Hyper-V-Firewall
+# eingehende Verbindungen von anderen LAN-Geraeten standardmaessig blockt.
+# Idempotent: eine vorhandene Regel wird aktualisiert statt dupliziert.
+function Set-JoliaFirewallRule {
+    try {
+        $vmCreator = Get-NetFirewallHyperVVMCreator -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -eq "WSL" } | Select-Object -First 1
+        $vmCreatorId = if ($vmCreator) { $vmCreator.VMCreatorId } else { "{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}" }
+
+        $existingRule = Get-NetFirewallHyperVRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
+        if ($null -ne $existingRule) {
+            Set-NetFirewallHyperVRule -Name $existingRule.Name -LocalPorts $AppPort -Protocol TCP -Enabled $true -Action Allow | Out-Null
+            Write-Ok "Hyper-V-Firewallregel '$FirewallRuleName' aktualisiert (Port $AppPort)."
+        } else {
+            New-NetFirewallHyperVRule -Name $FirewallRuleName -DisplayName $FirewallRuleName -Direction Inbound -VMCreatorId $vmCreatorId -Protocol TCP -LocalPorts $AppPort -Action Allow | Out-Null
+            Write-Ok "Hyper-V-Firewallregel '$FirewallRuleName' angelegt (Port $AppPort, LAN-Zugriff auf JOLIA freigegeben)."
+        }
+    } catch {
+        Write-Warn2 "Hyper-V-Firewallregel fuer Port $AppPort konnte nicht angelegt werden: $($_.Exception.Message)"
+        Write-Warn2 "JOLIA bleibt dadurch moeglicherweise nur ueber localhost erreichbar (nicht aus dem Heimnetz)."
+    }
+}
+
 function Invoke-JoliaUninstall {
     $installations = @(
         @{ DistroName = $DistroName; InstallRoot = $InstallRoot },
@@ -511,6 +602,13 @@ function Invoke-JoliaUninstall {
     Write-Host "Entferne Autostart-Task..." -ForegroundColor Yellow
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    Write-Host "  erledigt." -ForegroundColor Green
+
+    Write-Host "Entferne LAN-Firewallregel..." -ForegroundColor Yellow
+    $firewallRule = Get-NetFirewallHyperVRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
+    if ($null -ne $firewallRule) {
+        Remove-NetFirewallHyperVRule -Name $firewallRule.Name -ErrorAction SilentlyContinue
+    }
     Write-Host "  erledigt." -ForegroundColor Green
 
     $existingDistros = (wsl -l -q) -replace "`0", ""
@@ -756,6 +854,8 @@ if (Set-WslGlobalNetworkingMode) {
     }
 }
 
+Set-JoliaFirewallRule
+
 wsl --set-default-version 2 | Out-Null
 
 # ── Phase 3: Distro-Import ─────────────────────────────────────────────────
@@ -884,10 +984,7 @@ wsl -d $DistroName -u root -- bash -c "systemctl enable --now docker >/dev/null 
 # ── Phase 5: App-Deployment ─────────────────────────────────────────────────
 Write-Step "Hole JOLIA-Code..."
 
-$cloneCmd = "if [ -d $AppDirLinux/.git ]; then cd $AppDirLinux && git pull; else git clone $RepoUrl $AppDirLinux; fi"
-wsl -d $DistroName -u root -- bash -c $cloneCmd
-if ($LASTEXITCODE -ne 0) {
-    Write-Fail "Git-Clone/Pull fehlgeschlagen."
+if (-not (Sync-JoliaRepo -Distro $DistroName -AppDir $AppDirLinux -Repo $RepoUrl)) {
     Write-Warn2 "Falls das Repo privat ist: Git-Credentials sicher in der Distro konfigurieren oder einen SSH-Deploy-Key nutzen. PATs niemals direkt in Git-URLs eintragen."
     Exit-Fail
 }
@@ -956,6 +1053,12 @@ Save-JoliaStorageSettings
 Write-Host ""
 Write-Host "=== Fertig ===" -ForegroundColor Cyan
 Write-Host "JOLIA Docs: http://localhost:$AppPort" -ForegroundColor Green
+try {
+    $lanIp = (wsl -d $DistroName hostname -I).Trim().Split(" ")[0]
+    if (-not [string]::IsNullOrWhiteSpace($lanIp)) {
+        Write-Host "Aus dem Heimnetz (Mirrored Networking): http://${lanIp}:$AppPort" -ForegroundColor Green
+    }
+} catch { }
 Write-Host "Upload: FRITZ!NAS $FritzNasUploadMount  |  Archiv: WSL $ArchiveLinux  |  Backup: FRITZ!NAS $FritzNasBackupMount" -ForegroundColor DarkGray
 Write-Host "Deinstallation (rückstandsfrei): Menüoption 4" -ForegroundColor DarkGray
 Read-Host "`nDruecke Enter zum Schliessen"
