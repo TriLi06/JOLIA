@@ -253,7 +253,11 @@ function Register-JoliaAutostart {
     }
     $keepAlive = "set -e; $storageWait; systemctl start docker; cd $AppDirLinux; docker info >/dev/null; docker compose config --quiet; docker compose up -d app; exec sleep infinity"
     $keepAliveB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($keepAlive))
-    $action    = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\wsl.exe" -Argument "-d $DistroName -u root -- bash -c `"echo $keepAliveB64 | base64 -d | bash`""
+    $wslArguments = "-d $DistroName -u root -- bash -c `"echo $keepAliveB64 | base64 -d | bash`""
+    $hiddenLaunch = "`$process = Start-Process -FilePath '$env:SystemRoot\System32\wsl.exe' -ArgumentList '$wslArguments' -WindowStyle Hidden -Wait -PassThru; exit `$process.ExitCode"
+    $hiddenLaunchB64 = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($hiddenLaunch))
+    # Hide both the scheduled PowerShell process and the console window created by wsl.exe.
+    $action    = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -EncodedCommand $hiddenLaunchB64"
     $trigger   = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
     $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -RunLevel Highest
     $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
@@ -782,12 +786,34 @@ except Exception as error:
         } else {
             Write-Fail "Ollama-API-Test aus dem App-Container fehlgeschlagen: $($apiOutput -join ' ')"
         }
+
+        $inferenceProbe = @'
+import sys
+from app.services.ollama_service import get_background_ollama_service
+service = get_background_ollama_service()
+print('Import-Modell:', service.model, flush=True)
+try:
+    answer = service.generate('Antworte ausschliesslich mit OK.')
+    if not answer.strip():
+        raise RuntimeError('Das Modell hat eine leere Antwort geliefert.')
+    print('Inferenz erfolgreich:', answer.strip()[:120])
+except Exception as error:
+    print(type(error).__name__ + ': ' + str(error))
+    sys.exit(1)
+'@
+        $inferenceOutput = @(wsl -d $DistroName -u root -- docker exec jolia-app python -c $inferenceProbe 2>&1)
+        $inferenceExitCode = $LASTEXITCODE
+        if ($inferenceExitCode -eq 0) {
+            Write-Ok "Echte Ollama-Inferenz aus dem App-Container erfolgreich: $($inferenceOutput -join ' ')"
+        } else {
+            Write-Fail "Echte Ollama-Inferenz aus dem App-Container fehlgeschlagen: $($inferenceOutput -join ' ')"
+        }
     } else {
         Write-Warn2 "Ollama-API-Test aus der App uebersprungen: jolia-app laeuft nicht."
     }
 
     Write-Warn2 "HTTP 400 'Bad Request' bedeutet nicht automatisch, dass Ollama fehlt: Modell, Anfrageformat oder Bildunterstuetzung koennen unpassend sein."
-    Write-Host "Die Modellliste/API-Pruefung laedt kein Modell in den RAM und testet keine Inferenz." -ForegroundColor DarkGray
+    Write-Host "Der Inferenztest laedt das konfigurierte Import-Modell einmal in den Arbeitsspeicher." -ForegroundColor DarkGray
     foreach ($containerName in @("jolia-ollama-init", "jolia-ollama", "jolia-app")) {
         Write-Step "Letzte 40 Logzeilen: $containerName"
         $previousEncoding = [Console]::OutputEncoding

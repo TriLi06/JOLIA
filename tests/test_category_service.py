@@ -69,7 +69,7 @@ def test_category_prompt_contains_full_context_and_existing_paths(monkeypatch):
 
     class FakeOllama:
         def is_available(self):
-            return True
+            return False
 
         def generate(self, prompt):
             captured["prompt"] = prompt
@@ -79,6 +79,7 @@ def test_category_prompt_contains_full_context_and_existing_paths(monkeypatch):
         "app.services.category_service._get_categorization_ollama_service",
         lambda config: FakeOllama(),
     )
+    monkeypatch.setattr("app.config.get_config", lambda: object())
     monkeypatch.setattr(
         "app.services.category_service._build_tree_paths",
         lambda db: ["Bilder > 2026", "Dokumente > Buecher > Autor"],

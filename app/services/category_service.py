@@ -364,8 +364,6 @@ def _suggest_category_result(
         from app.config import get_config
 
         ollama = _get_categorization_ollama_service(get_config())
-        if not ollama.is_available():
-            return None, True, "", "Der KI-Dienst ist nicht erreichbar."
 
         existing_paths = _build_tree_paths(db)
         existing_str = "\n".join(f"- {p}" for p in existing_paths) if existing_paths else "(noch keine vorhanden)"
@@ -521,4 +519,3 @@ def run_categorize_all_uncategorized_job(job_id: str, db: Session) -> None:
     except Exception as exc:
         logger.warning("Batch-Kategorisierung fehlgeschlagen: %s", exc)
         repo.finish_job(db, job_id, success=False, error_message=str(exc))
-

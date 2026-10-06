@@ -16,13 +16,9 @@ def generate_image_summary(
 ) -> str:
     """Generiert eine kurze Zusammenfassung für ein Bild auf Deutsch."""
     try:
-        from app.config import get_config
         from app.services.ollama_service import get_background_ollama_service
 
-        cfg = get_config()
         ollama = get_background_ollama_service()
-        if not ollama.is_available():
-            return _fallback_image_summary(vision_description, face_count)
 
         context_parts = []
         if vision_description:
@@ -66,8 +62,6 @@ def generate_document_summary(text_content: str) -> str:
         from app.services.ollama_service import get_background_ollama_service
 
         ollama = get_background_ollama_service()
-        if not ollama.is_available():
-            return _fallback_text_summary(text_content)
 
         excerpt = text_content[:_INPUT_LIMIT].strip()
         prompt = (

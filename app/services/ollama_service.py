@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+_POST_ATTEMPTS = 3
+_RETRY_DELAYS = (0.5, 1.0)
 
 
 class OllamaService:
@@ -23,6 +27,40 @@ class OllamaService:
             return r.status_code == 200
         except Exception:
             return False
+
+    def _post(self, url: str, payload: dict, timeout: float | None = None) -> httpx.Response:
+        request_timeout = self.timeout if timeout is None else timeout
+        for attempt in range(_POST_ATTEMPTS):
+            try:
+                response = httpx.post(url, json=payload, timeout=request_timeout)
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                if attempt == _POST_ATTEMPTS - 1:
+                    raise
+                delay = _RETRY_DELAYS[attempt]
+                logger.warning(
+                    "Ollama unter %s nicht erreichbar; neuer Versuch in %.1fs (%d/%d).",
+                    self.base_url,
+                    delay,
+                    attempt + 1,
+                    _POST_ATTEMPTS,
+                )
+                time.sleep(delay)
+                continue
+
+            if response.status_code not in (502, 503, 504) or attempt == _POST_ATTEMPTS - 1:
+                return response
+
+            delay = _RETRY_DELAYS[attempt]
+            logger.warning(
+                "Ollama antwortet mit HTTP %s; neuer Versuch in %.1fs (%d/%d).",
+                response.status_code,
+                delay,
+                attempt + 1,
+                _POST_ATTEMPTS,
+            )
+            time.sleep(delay)
+
+        raise RuntimeError("Ollama-Anfrage endete unerwartet ohne Antwort.")
 
     def generate(self, prompt: str, system: str | None = None) -> str:
         payload: dict = {
@@ -46,7 +84,7 @@ class OllamaService:
         )
 
         try:
-            r = httpx.post(url, json=payload, timeout=self.timeout)
+            r = self._post(url, payload)
             logger.debug(
                 "Ollama Antwort erhalten → HTTP %s | Antwort-Länge: %d Zeichen",
                 r.status_code,
@@ -75,21 +113,25 @@ class OllamaService:
     def embed(self, texts: list[str], model: str) -> list[list[float]]:
         """Erzeugt Embeddings via Ollama /api/embed (Batch)."""
         try:
-            r = httpx.post(
+            r = self._post(
                 f"{self.base_url}/api/embed",
-                json={"model": model, "input": texts, "keep_alive": self.keep_alive},
-                timeout=self.timeout,
+                {"model": model, "input": texts, "keep_alive": self.keep_alive},
             )
             r.raise_for_status()
             return r.json()["embeddings"]
-        except Exception:
+        except httpx.HTTPStatusError as exc:
             # Fallback: einzeln über /api/embeddings (ältere Ollama-Versionen)
+            unsupported_endpoint = exc.response.status_code == 405 or (
+                exc.response.status_code == 404
+                and "page not found" in exc.response.text.lower()
+            )
+            if not unsupported_endpoint:
+                raise
             results = []
             for text in texts:
-                r = httpx.post(
+                r = self._post(
                     f"{self.base_url}/api/embeddings",
-                    json={"model": model, "prompt": text, "keep_alive": self.keep_alive},
-                    timeout=self.timeout,
+                    {"model": model, "prompt": text, "keep_alive": self.keep_alive},
                 )
                 r.raise_for_status()
                 results.append(r.json()["embedding"])
@@ -111,9 +153,9 @@ class OllamaService:
                 "Trenne Beschreibung und extrahierten Text mit '--- TEXT ---'."
             )
 
-        r = httpx.post(
+        r = self._post(
             f"{self.base_url}/api/generate",
-            json={
+            {
                 "model": model,
                 "prompt": prompt,
                 "images": [image_b64],

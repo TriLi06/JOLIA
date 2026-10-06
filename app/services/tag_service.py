@@ -112,8 +112,6 @@ def suggest_tags(db: Session, text_context: str, is_image: bool = False) -> list
         from app.services.ollama_service import get_background_ollama_service
 
         ollama = get_background_ollama_service()
-        if not ollama.is_available():
-            return []
 
         existing = [t["name"] for t in list_tags(db)]
         existing_str = ", ".join(existing) if existing else "(noch keine vorhanden)"

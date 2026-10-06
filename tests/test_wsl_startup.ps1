@@ -75,23 +75,36 @@ function Unregister-ScheduledTask {}
 function Register-ScheduledTask {}
 function Start-ScheduledTask {}
 function Write-Ok {}
+function Get-AutostartKeepAlive {
+    if ($script:taskExe -notlike '*\WindowsPowerShell\v1.0\powershell.exe' -or
+        $script:taskArgs -notlike '*-NoProfile -WindowStyle Hidden -EncodedCommand *') {
+        throw 'Autostart launcher is not hidden'
+    }
+    $launcherEncoded = [regex]::Match($script:taskArgs, '-EncodedCommand ([A-Za-z0-9+/=]+)').Groups[1].Value
+    if (-not $launcherEncoded) { throw 'Missing encoded autostart launcher' }
+    $launcher = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($launcherEncoded))
+    if ($launcher -notmatch 'Start-Process .* -WindowStyle Hidden -Wait -PassThru') {
+        throw 'WSL process is not hidden or awaited'
+    }
+    $keepAliveEncoded = [regex]::Match($launcher, 'echo ([A-Za-z0-9+/=]+) \| base64 -d').Groups[1].Value
+    if (-not $keepAliveEncoded) { throw 'Missing encoded keepalive command' }
+    return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($keepAliveEncoded))
+}
 Register-JoliaAutostart
-$encoded = [regex]::Match($script:taskArgs, 'echo ([A-Za-z0-9+/=]+) \| base64 -d').Groups[1].Value
-$localAutostart = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))
-if ($script:taskExe -notlike '*\wsl.exe' -or $localAutostart -notlike 'set -e;*docker compose config --quiet; docker compose up -d app; exec sleep infinity') {
-    throw 'Unsafe autostart command'
+$localAutostart = Get-AutostartKeepAlive
+if ($localAutostart -notlike 'set -e;*docker compose config --quiet; docker compose up -d app; exec sleep infinity') {
+    throw 'Invalid autostart command'
 }
 if ($script:triggerUser -ne "$env:USERDOMAIN\$env:USERNAME") { throw 'Autostart is not scoped to the WSL owner' }
 $StorageMode = 'FritzNas'
 $FritzNasUploadMount = '/mnt/fritznas_upload'
 $FritzNasBackupMount = '/mnt/fritznas_backup'
 Register-JoliaAutostart
-$encoded = [regex]::Match($script:taskArgs, 'echo ([A-Za-z0-9+/=]+) \| base64 -d').Groups[1].Value
-$nasAutostart = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))
+$nasAutostart = Get-AutostartKeepAlive
 if ($nasAutostart -notlike '*mountpoint -q /mnt/fritznas_upload && mountpoint -q /mnt/fritznas_backup || exit 1*') {
     throw 'NAS autostart does not gate container startup on mounts'
 }
-Write-Output 'PASS: local/NAS autostart uses direct WSL invocation and fails before keepalive on startup errors'
+Write-Output 'PASS: local/NAS autostart hides WSL and fails before keepalive on startup errors'
 
 function Get-NetIPConfiguration {
     foreach ($adapter in @(
@@ -153,6 +166,7 @@ Write-Output 'PASS: installer PowerShell syntax'
 
 $script:diagnosticWarnings = @()
 $script:diagnosticLogs = @()
+$script:diagnosticInferenceCalls = 0
 $script:missingModel = $false
 function Write-Step {}
 function Write-Fail {}
@@ -175,16 +189,22 @@ function wsl {
     } elseif ($args -contains 'logs') {
         $script:diagnosticLogs += $args[-1]
         Write-Error 'pulling model: 100%' -ErrorId NativeCommandError
+    } elseif (($args -join "`n") -match 'get_background_ollama_service') {
+        $script:diagnosticInferenceCalls++
+        'Import-Modell: qwen2.5:7b'
+        'Inferenz erfolgreich: OK'
     } else {
         'HTTP 200'
     }
 }
 Test-JoliaOllama
 if ($script:diagnosticWarnings -like "Standardmodell '*' fehlt.*") { throw 'Installed default model tag was reported missing' }
+if ($script:diagnosticInferenceCalls -ne 1) { throw 'Configured import-model inference was not tested' }
 if (($script:diagnosticLogs -join ',') -ne 'jolia-ollama-init,jolia-ollama,jolia-app') { throw 'stderr prevented remaining container logs' }
 if ($ErrorActionPreference -ne 'Stop') { throw 'Diagnostic changed caller error handling' }
 $script:missingModel = $true
 $script:diagnosticWarnings = @()
 Test-JoliaOllama
 if (-not ($script:diagnosticWarnings -like "Standardmodell 'bge-m3' fehlt.*")) { throw 'Missing model was not reported' }
+if ($script:diagnosticInferenceCalls -ne 2) { throw 'Inference probe did not run when the model list was incomplete' }
 Write-Output 'PASS: diagnostics accept latest tags, detect missing models and continue after stderr'
