@@ -788,14 +788,30 @@ except Exception as error:
         }
 
         $inferenceProbe = @'
-import sys
-from app.services.ollama_service import get_background_ollama_service
-service = get_background_ollama_service()
-print('Import-Modell:', service.model, flush=True)
+import tempfile
+from pathlib import Path
+from PIL import Image
+from app.config import get_config
+from app.services.ollama_service import OllamaService
+config = get_config()
+service = OllamaService(
+    base_url=config.models.ollama_base_url,
+    model=config.models.vision_ollama_model,
+    timeout=config.models.vision_ollama_timeout,
+    keep_alive=config.models.ollama_keep_alive,
+)
+print('Vision-Modell:', service.model, flush=True)
 try:
-    answer = service.generate('Antworte ausschliesslich mit OK.')
+    with tempfile.TemporaryDirectory(prefix='jolia-ollama-check-') as workdir:
+        image_path = Path(workdir) / 'probe.jpg'
+        Image.new('RGB', (64, 64), color='white').save(image_path, format='JPEG')
+        answer = service.describe_image(
+            str(image_path),
+            model=service.model,
+            prompt='Beschreibe dieses Bild in einem kurzen Satz.',
+        )
     if not answer.strip():
-        raise RuntimeError('Das Modell hat eine leere Antwort geliefert.')
+        raise RuntimeError('Das Vision-Modell hat keine Antwort geliefert.')
     print('Inferenz erfolgreich:', answer.strip()[:120])
 except Exception as error:
     print(type(error).__name__ + ': ' + str(error))
@@ -804,16 +820,16 @@ except Exception as error:
         $inferenceOutput = @(wsl -d $DistroName -u root -- docker exec jolia-app python -c $inferenceProbe 2>&1)
         $inferenceExitCode = $LASTEXITCODE
         if ($inferenceExitCode -eq 0) {
-            Write-Ok "Echte Ollama-Inferenz aus dem App-Container erfolgreich: $($inferenceOutput -join ' ')"
+            Write-Ok "Echte Ollama-Vision-Inferenz aus dem App-Container erfolgreich: $($inferenceOutput -join ' ')"
         } else {
-            Write-Fail "Echte Ollama-Inferenz aus dem App-Container fehlgeschlagen: $($inferenceOutput -join ' ')"
+            Write-Fail "Echte Ollama-Vision-Inferenz aus dem App-Container fehlgeschlagen: $($inferenceOutput -join ' ')"
         }
     } else {
         Write-Warn2 "Ollama-API-Test aus der App uebersprungen: jolia-app laeuft nicht."
     }
 
     Write-Warn2 "HTTP 400 'Bad Request' bedeutet nicht automatisch, dass Ollama fehlt: Modell, Anfrageformat oder Bildunterstuetzung koennen unpassend sein."
-    Write-Host "Der Inferenztest laedt das konfigurierte Import-Modell einmal in den Arbeitsspeicher." -ForegroundColor DarkGray
+    Write-Host "Der Inferenztest laedt das konfigurierte Vision-Modell einmal in den Arbeitsspeicher und sendet ein Testbild." -ForegroundColor DarkGray
     foreach ($containerName in @("jolia-ollama-init", "jolia-ollama", "jolia-app")) {
         Write-Step "Letzte 40 Logzeilen: $containerName"
         $previousEncoding = [Console]::OutputEncoding

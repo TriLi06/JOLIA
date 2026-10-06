@@ -189,9 +189,9 @@ function wsl {
     } elseif ($args -contains 'logs') {
         $script:diagnosticLogs += $args[-1]
         Write-Error 'pulling model: 100%' -ErrorId NativeCommandError
-    } elseif (($args -join "`n") -match 'get_background_ollama_service') {
+    } elseif (($args -join "`n") -match 'describe_image') {
         $script:diagnosticInferenceCalls++
-        'Import-Modell: qwen2.5:7b'
+        'Vision-Modell: qwen2.5vl:3b'
         'Inferenz erfolgreich: OK'
     } else {
         'HTTP 200'

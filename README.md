@@ -60,8 +60,9 @@ Teste deshalb auch von einem zweiten Gerät im selben vertrauenswürdigen Heimne
 Ollama ist absichtlich nur im Docker-Netz unter `http://ollama:11434` erreichbar.
 `http://localhost:11434` auf Windows und die LAN-IP auf Port `11434` sind keine
 vorgesehenen Zugriffswege. Menüpunkt `7` prüft die Verbindung aus dem App-Container,
-die Modellliste, eine echte Inferenz mit dem Import-Modell und die Init-Logs. Der
-Inferenztest lädt das Modell dafür einmal in den Arbeitsspeicher. `jolia-ollama-init`
+die Modellliste, eine echte Bild-Inferenz mit dem konfigurierten Vision-Modell und
+die Init-Logs. Der Inferenztest lädt das Modell dafür einmal in den Arbeitsspeicher.
+`jolia-ollama-init`
 mit Status `Exited (0)` ist normal; bei einem fehlgeschlagenen Modell-Download
 startet die App nicht.
 

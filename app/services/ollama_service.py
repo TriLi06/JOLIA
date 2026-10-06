@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from io import BytesIO
 
 import httpx
 
@@ -62,6 +63,22 @@ class OllamaService:
 
         raise RuntimeError("Ollama-Anfrage endete unerwartet ohne Antwort.")
 
+    @staticmethod
+    def _raise_for_status(response: httpx.Response) -> None:
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = response.text.strip()
+            if detail:
+                detail = detail[:1000]
+                logger.error("Ollama HTTP-Fehler %s: %s", response.status_code, detail)
+                raise httpx.HTTPStatusError(
+                    f"{exc} — Ollama: {detail}",
+                    request=exc.request,
+                    response=response,
+                ) from exc
+            raise
+
     def generate(self, prompt: str, system: str | None = None) -> str:
         payload: dict = {
             "model": self.model,
@@ -90,16 +107,13 @@ class OllamaService:
                 r.status_code,
                 len(r.text),
             )
-            r.raise_for_status()
+            self._raise_for_status(r)
             return r.json().get("response", "")
         except httpx.TimeoutException:
             logger.error(
                 "Ollama-Timeout nach %ss – Modell: %s, URL: %s",
                 self.timeout, self.model, url,
             )
-            raise
-        except httpx.HTTPStatusError as exc:
-            logger.error("Ollama HTTP-Fehler: %s", exc)
             raise
 
     def list_models(self) -> list[str]:
@@ -117,7 +131,7 @@ class OllamaService:
                 f"{self.base_url}/api/embed",
                 {"model": model, "input": texts, "keep_alive": self.keep_alive},
             )
-            r.raise_for_status()
+            self._raise_for_status(r)
             return r.json()["embeddings"]
         except httpx.HTTPStatusError as exc:
             # Fallback: einzeln über /api/embeddings (ältere Ollama-Versionen)
@@ -133,7 +147,7 @@ class OllamaService:
                     f"{self.base_url}/api/embeddings",
                     {"model": model, "prompt": text, "keep_alive": self.keep_alive},
                 )
-                r.raise_for_status()
+                self._raise_for_status(r)
                 results.append(r.json()["embedding"])
             return results
 
@@ -142,8 +156,23 @@ class OllamaService:
         Gibt eine Beschreibung inkl. erkanntem Text zurück."""
         import base64
 
-        with open(image_path, "rb") as f:
-            image_b64 = base64.b64encode(f.read()).decode("utf-8")
+        from PIL import Image, ImageOps
+
+        if image_path.lower().endswith((".heic", ".heif")):
+            from pillow_heif import register_heif_opener
+
+            register_heif_opener()
+
+        image_buffer = BytesIO()
+        with Image.open(image_path) as source_image:
+            image = ImageOps.exif_transpose(source_image)
+            image.thumbnail((4096, 4096), Image.Resampling.LANCZOS)
+            if image.mode in ("RGBA", "LA") or "transparency" in image.info:
+                rgba = image.convert("RGBA")
+                background = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+                image = Image.alpha_composite(background, rgba)
+            image.convert("RGB").save(image_buffer, format="JPEG", quality=95)
+        image_b64 = base64.b64encode(image_buffer.getvalue()).decode("ascii")
 
         if prompt is None:
             prompt = (
@@ -173,7 +202,7 @@ class OllamaService:
             },
             timeout=self.timeout,
         )
-        r.raise_for_status()
+        self._raise_for_status(r)
         return r.json().get("response", "")
 
 
