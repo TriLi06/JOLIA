@@ -49,6 +49,35 @@ Vor dem Docker-Build und den Ollama-Modell-Downloads zeigt das Skript zusätzlic
 Bei FRITZ!NAS-Speicher sind die im Skript stehenden Zugangswerte nur Beispiele. Ersetze sie vor der Verwendung durch eigene Werte oder wähle im Menü einen lokalen Speicherordner. Veröffentliche keine persönlichen Zugangsdaten.
 
 Nach erfolgreichem Start ist JOLIA unter <http://localhost:8090> erreichbar.
+Das Skript gibt zusätzlich die LAN-Adresse für andere Geräte im Heimnetz aus.
+Bei Problemen mit dem Netzwerkzugriff wähle im Menü `7` für die schrittweise
+Diagnose; Menüpunkt `1` installiert oder repariert die WSL-/LAN-Konfiguration.
+
+Für andere Geräte verwende `http://<Windows-LAN-IP>:8090`, nicht eine Docker-Bridge-
+oder WSL-NAT-Adresse. Das Heimnetz muss in Windows als **Privat** eingestuft sein;
+öffentliche Netzwerke bleiben bewusst gesperrt. Ein Test vom Windows-Host auf seine
+eigene LAN-IP kann im Mirrored-Modus fehlschlagen, obwohl andere Geräte Zugriff haben.
+Teste deshalb auch von einem zweiten Gerät im selben vertrauenswürdigen Heimnetz.
+
+Ollama ist absichtlich nur im Docker-Netz unter `http://ollama:11434` erreichbar.
+`http://localhost:11434` auf Windows und die LAN-IP auf Port `11434` sind keine
+vorgesehenen Zugriffswege. Menüpunkt `7` prüft die Verbindung aus dem App-Container,
+die Modellliste und die Init-Logs. `jolia-ollama-init` mit Status `Exited (0)` ist
+normal; bei einem fehlgeschlagenen Modell-Download startet die App nicht.
+
+Bei einer Reparatur schreibt der Installer Port und Speicherpfade in
+`/opt/jolia/.env` neu und prüft die Compose-Konfiguration. Er meldet einen
+fehlgeschlagenen App-Start nicht als erfolgreiche Installation. Ist trotz
+`networkingMode=mirrored` noch NAT aktiv, speichere zuerst andere WSL-Arbeit,
+führe `wsl --shutdown` aus und starte Menüpunkt `1` erneut. Verwende denselben
+Windows-Benutzer wie bei der Installation: WSL-Distributionen sind benutzergebunden.
+
+Regressionstests für den Installer (ohne Installation, Administratorrechte oder
+Modell-Downloads):
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\test_wsl_startup.ps1
+```
 
 ### Installer-EXE bauen
 
@@ -78,6 +107,7 @@ Das WSL-Menü bietet:
 | `4` | WSL-Distribution und darin gespeicherte JOLIA-/Docker-Daten löschen |
 | `5` | Installationsstatus prüfen |
 | `6` | FRITZ!NAS oder lokalen Speicherordner konfigurieren |
+| `7` | LAN-Zugriff einschließlich Container-Health und Docker-Portweiterleitung testen |
 
 Menüpunkt `4` löscht die JOLIA-WSL-Distribution einschließlich der darin gespeicherten Archive, Datenbanken, Modelle, Container und Volumes. Erstelle und prüfe vorher ein Backup. Die Windows-Features WSL2 und Virtual Machine Platform bleiben aktiviert. Der geklonte Ordner `%USERPROFILE%\JOLIA` wird nicht automatisch entfernt.
 

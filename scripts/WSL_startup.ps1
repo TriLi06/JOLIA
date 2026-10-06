@@ -217,8 +217,7 @@ function Set-JoliaStorage {
             wsl -d $DistroName -u root -- bash -c "systemctl disable --now jolia-fritznas.service >/dev/null 2>&1 || true; for m in $FritzNasUploadMount $FritzNasBackupMount $FritzNasRootMount; do while mountpoint -q `$m; do umount `$m || break; done; done"
         }
 
-        Set-JoliaEnvVar -Distro $DistroName -AppDir $AppDirLinux -Key "JOLIA_INBOX" -Value $JoliaInboxLinux
-        Set-JoliaEnvVar -Distro $DistroName -AppDir $AppDirLinux -Key "JOLIA_BACKUP" -Value $JoliaBackupLinux
+        Set-JoliaDeploymentConfig -Distro $DistroName
         wsl -d $DistroName -u root -- bash -c "cd $AppDirLinux && docker compose up -d --force-recreate app"
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "Speicherpfade wurden gespeichert, aber JOLIA konnte nicht neu gestartet werden."
@@ -252,9 +251,10 @@ function Register-JoliaAutostart {
     if ($StorageMode -eq "FritzNas") {
         $storageWait = "systemctl start jolia-fritznas.service || true; for attempt in {1..60}; do if mountpoint -q $FritzNasUploadMount && mountpoint -q $FritzNasBackupMount; then break; fi; sleep 2; done; mountpoint -q $FritzNasUploadMount && mountpoint -q $FritzNasBackupMount || exit 1"
     }
-    $keepAlive = "wsl.exe -d $DistroName -u root -- bash -c '$storageWait; cd $AppDirLinux && docker compose up -d --force-recreate app; exec sleep infinity'"
-    $action    = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -Command `"$keepAlive`""
-    $trigger   = New-ScheduledTaskTrigger -AtLogOn
+    $keepAlive = "set -e; $storageWait; systemctl start docker; cd $AppDirLinux; docker info >/dev/null; docker compose config --quiet; docker compose up -d app; exec sleep infinity"
+    $keepAliveB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($keepAlive))
+    $action    = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\wsl.exe" -Argument "-d $DistroName -u root -- bash -c `"echo $keepAliveB64 | base64 -d | bash`""
+    $trigger   = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
     $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -RunLevel Highest
     $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
 
@@ -421,7 +421,12 @@ function Update-Jolia {
         Write-Fail "Der konfigurierte lokale Speicherordner fehlt. Verwende Menüpunkt 6 zur erneuten Auswahl."
         return
     }
-    wsl -d $DistroName -u root -- bash -c "systemctl enable --now docker >/dev/null 2>&1 || service docker start"
+    Set-JoliaDeploymentConfig -Distro $DistroName
+    wsl -d $DistroName -u root -- bash -c "(systemctl enable --now docker || service docker start) && docker info >/dev/null && docker compose version && cd $AppDirLinux && docker compose config --quiet"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Docker, Compose oder die Deployment-Konfiguration ist nicht einsatzbereit. Mit Option 1 reparieren."
+        return
+    }
     if (-not (Confirm-JoliaModelTerms)) {
         return
     }
@@ -430,28 +435,53 @@ function Update-Jolia {
         Write-Fail "JOLIA konnte nach dem Update nicht gebaut/gestartet werden."
         return
     }
-    Write-Ok "JOLIA wurde aktualisiert und gestartet. Der Autostart wurde nicht verändert."
+    Write-Ok "JOLIA wurde aktualisiert und gestartet."
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($null -ne $task -and $task.State -ne "Disabled") {
+        Register-JoliaAutostart
+    }
     Show-JoliaAccessUrls -Distro $DistroName
 }
 
 # Gibt die Adressen aus, unter denen JOLIA erreichbar ist (lokal und, falls
 # ermittelbar, aus dem Heimnetz via Mirrored Networking). Wird nach Installation
 # und nach jedem Update aufgerufen.
+function Get-JoliaLanAddresses {
+    Get-NetIPConfiguration -ErrorAction Stop |
+        Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq "Up" -and $_.NetAdapter.HardwareInterface } |
+        ForEach-Object { $_.IPv4Address.IPAddress } |
+        Where-Object { $_ -and $_ -notmatch '^(127\.|169\.254\.)' } |
+        Select-Object -Unique
+}
+
 function Show-JoliaAccessUrls ($Distro) {
     Write-Host "JOLIA Docs: http://localhost:$AppPort" -ForegroundColor Green
     try {
-        $lanIp = (wsl -d $Distro hostname -I).Trim().Split(" ")[0]
-        if (-not [string]::IsNullOrWhiteSpace($lanIp)) {
+        foreach ($lanIp in @(Get-JoliaLanAddresses)) {
             Write-Host "Aus dem Heimnetz (Mirrored Networking): http://${lanIp}:$AppPort" -ForegroundColor Green
         }
-    } catch { }
+    } catch {
+        Write-Warn2 "Windows-LAN-Adresse konnte nicht ermittelt werden: $($_.Exception.Message)"
+    }
 }
 
 # Setzt/aktualisiert einen einzelnen Schluessel in der .env-Datei der App (idempotent).
 function Set-JoliaEnvVar ($Distro, $AppDir, $Key, $Value) {
-    $lineB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes("$Key=$Value"))
-    $cmd = "touch $AppDir/.env; grep -v '^$Key=' $AppDir/.env > $AppDir/.env.tmp || true; echo $lineB64 | base64 -d >> $AppDir/.env.tmp; mv $AppDir/.env.tmp $AppDir/.env"
+    $lineB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes("$Key=$Value`n"))
+    $cmd = "set -e; touch $AppDir/.env; grep -v '^$Key=' $AppDir/.env > $AppDir/.env.tmp || [ `$? -eq 1 ]; echo $lineB64 | base64 -d >> $AppDir/.env.tmp; mv $AppDir/.env.tmp $AppDir/.env"
     wsl -d $Distro -u root -- bash -c $cmd
+    if ($LASTEXITCODE -ne 0) {
+        throw "Die JOLIA-Konfiguration '$Key' konnte nicht gespeichert werden."
+    }
+}
+
+function Set-JoliaDeploymentConfig ($Distro) {
+    wsl -d $Distro -u root -- mkdir -p $ArchiveLinux
+    if ($LASTEXITCODE -ne 0) { throw "Der Archivordner konnte nicht angelegt werden." }
+    Set-JoliaEnvVar -Distro $Distro -AppDir $AppDirLinux -Key "JOLIA_PORT" -Value $AppPort
+    Set-JoliaEnvVar -Distro $Distro -AppDir $AppDirLinux -Key "JOLIA_INBOX" -Value $JoliaInboxLinux
+    Set-JoliaEnvVar -Distro $Distro -AppDir $AppDirLinux -Key "JOLIA_ARCHIVE" -Value $ArchiveLinux
+    Set-JoliaEnvVar -Distro $Distro -AppDir $AppDirLinux -Key "JOLIA_BACKUP" -Value $JoliaBackupLinux
 }
 
 # Bindet die beiden FRITZ!NAS-Freigaben (Upload/Backup) per CIFS in die Distro ein.
@@ -516,7 +546,7 @@ WantedBy=multi-user.target
     if ($mountResult -match "OK") {
         Write-Ok "FRITZ!NAS-Freigaben eingebunden ($FritzNasUploadMount, $FritzNasBackupMount)."
     } else {
-        Write-Warn2 "FRITZ!NAS-Freigaben konnten nicht eingebunden werden (Router/Freigabe erreichbar?). JOLIA startet trotzdem."
+        Write-Warn2 "FRITZ!NAS-Freigaben konnten nicht eingebunden werden (Router/Freigabe erreichbar?). Speicher vor dem App-Start reparieren."
         Write-Warn2 "Ausgabe: $mountResult"
         $status = wsl -d $Distro -u root --exec bash -c "systemctl status jolia-fritznas.service --no-pager -l 2>&1"
         Write-Warn2 "Dienststatus: $status"
@@ -531,16 +561,18 @@ WantedBy=multi-user.target
 # ueberschreiben.
 function Set-WslConf ($Distro) {
     $current = wsl -d $Distro -u root -- bash -c "cat /etc/wsl.conf 2>/dev/null"
-    if ($current -match "systemd\s*=\s*true" -and $current -match "\[automount\]") {
+    wsl -d $Distro -u root -- bash -c "mkdir -p /mnt/c && (grep -q '^C: /mnt/c' /etc/fstab 2>/dev/null || printf 'C: /mnt/c drvfs defaults 0 0\n' >> /etc/fstab)"
+    if ($LASTEXITCODE -ne 0) { throw "Der Windows-Speichermount konnte nicht konfiguriert werden." }
+    if (($current -join "`n") -match "systemd\s*=\s*true" -and ($current -join "`n") -match '(?s)\[automount\][^\[]*enabled\s*=\s*false' -and ($current -join "`n") -match '(?s)\[automount\][^\[]*mountFsTab\s*=\s*true') {
         return
     }
     Write-Step "Konfiguriere /etc/wsl.conf (systemd, Laufwerks-Automount auf C: beschraenkt)..."
     $wslConf = "[boot]`nsystemd=true`n`n[automount]`nenabled = false`nmountFsTab = true`n"
     $wslConfB64 = [Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($wslConf))
     wsl -d $Distro -u root -- bash -c "echo $wslConfB64 | base64 -d > /etc/wsl.conf"
-    wsl -d $Distro -u root -- bash -c "grep -q '^C: /mnt/c' /etc/fstab 2>/dev/null || printf 'C: /mnt/c drvfs defaults 0 0\n' >> /etc/fstab"
+    if ($LASTEXITCODE -ne 0) { throw "wsl.conf konnte nicht gespeichert werden." }
     wsl --terminate $Distro
-    Start-Sleep -Seconds 3
+    if ($LASTEXITCODE -ne 0) { throw "Die WSL-Distro konnte nicht neu gestartet werden." }
     Write-Ok "wsl.conf aktualisiert (Distro neu gestartet)."
 }
 
@@ -662,14 +694,167 @@ function Set-JoliaFirewallRule {
 # Hyper-V-Firewall (Regel + globale VM-Policy), normale Windows-Firewall,
 # Netzwerkprofil (Privat/Oeffentlich) und optional einen echten Verbindungstest
 # von einem zweiten Geraet.
+function Test-JoliaOllama {
+    Write-Host ""
+    Write-Step "Pruefe Ollama-Container, Modelle und Verbindung aus der App..."
+    Write-Host "Ollama laeuft als Docker-Container innerhalb von '$DistroName', nicht als eigene WSL-Distro." -ForegroundColor DarkGray
+    Write-Host "Port 11434 wird bewusst NICHT auf Windows/LAN veroeffentlicht. Die App verwendet intern http://ollama:11434." -ForegroundColor DarkGray
+    $appRunning = $false
+    $ollamaRunning = $false
+    foreach ($containerName in @("jolia-ollama", "jolia-ollama-init", "jolia-app")) {
+        $inspectOutput = @(wsl -d $DistroName -u root -- docker inspect $containerName 2>&1)
+        $inspectExitCode = $LASTEXITCODE
+        if ($inspectExitCode -ne 0 -or -not $inspectOutput) {
+            Write-Fail "Container '$containerName' fehlt oder Docker antwortet nicht: $($inspectOutput -join ' ')"
+            continue
+        }
+        try {
+            $container = (ConvertFrom-Json -InputObject ($inspectOutput -join "`n"))[0]
+            $state = $container.State
+            if ($containerName -eq "jolia-ollama-init") {
+                if ($state.Status -eq "exited" -and $state.ExitCode -eq 0) {
+                    Write-Ok "Modell-Download abgeschlossen: jolia-ollama-init Exited (0) ist normal."
+                } elseif ($state.Running) {
+                    Write-Warn2 "jolia-ollama-init laeuft noch; Modelle werden moeglicherweise noch heruntergeladen."
+                } else {
+                    Write-Fail "Modell-Download nicht erfolgreich abgeschlossen (Status: $($state.Status), Exit-Code: $($state.ExitCode))."
+                }
+            } elseif ($state.Running) {
+                Write-Ok "Container '$containerName' laeuft."
+                if ($containerName -eq "jolia-app") { $appRunning = $true }
+                if ($containerName -eq "jolia-ollama") { $ollamaRunning = $true }
+            } else {
+                Write-Fail "Container '$containerName' laeuft nicht (Status: $($state.Status), Exit-Code: $($state.ExitCode))."
+            }
+            if ($state.Health) {
+                if ($state.Health.Status -eq "healthy") {
+                    Write-Ok "${containerName}: Healthcheck healthy."
+                } else {
+                    Write-Warn2 "${containerName}: Healthcheck $($state.Health.Status)."
+                    $healthLog = @($state.Health.Log | Where-Object { $_.Output })
+                    if ($healthLog.Count -gt 0) { Write-Host $healthLog[-1].Output.Trim() }
+                }
+            }
+        } catch {
+            Write-Fail "Status von '$containerName' konnte nicht ausgewertet werden: $($_.Exception.Message)"
+        }
+    }
+
+    if ($ollamaRunning) {
+        $modelOutput = @(wsl -d $DistroName -u root -- docker exec jolia-ollama ollama list 2>&1)
+        $modelExitCode = $LASTEXITCODE
+        if ($modelExitCode -eq 0) {
+            Write-Ok "Ollama antwortet auf 'ollama list'. Installierte Modelle:"
+            $modelOutput | ForEach-Object { Write-Host $_ }
+            foreach ($model in @("qwen2.5:1.5b", "qwen2.5:7b", "qwen2.5vl:3b", "bge-m3")) {
+                if (($modelOutput -join "`n") -notmatch "(?m)^\s*$([regex]::Escape($model))\s") {
+                    Write-Warn2 "Standardmodell '$model' fehlt. Modell-Download/Init-Logs pruefen."
+                }
+            }
+        } else {
+            Write-Fail "Ollama-Modellliste konnte nicht abgefragt werden: $($modelOutput -join ' ')"
+        }
+    }
+
+    if ($appRunning) {
+        $apiProbe = @'
+import json, os, sys, urllib.request, urllib.error
+base_url = os.environ.get('OLLAMA_BASE_URL', 'http://ollama:11434').rstrip('/')
+print('OLLAMA_BASE_URL=' + base_url, flush=True)
+try:
+    with urllib.request.urlopen(base_url + '/api/tags', timeout=10) as response:
+        payload = json.load(response)
+        print('HTTP', response.status)
+        print('Modelle:', ', '.join(model['name'] for model in payload['models']) or '(keine)')
+except urllib.error.HTTPError as error:
+    print('HTTP', error.code, error.read().decode('utf-8', errors='replace'))
+    sys.exit(1)
+except Exception as error:
+    print(type(error).__name__ + ': ' + str(error))
+    sys.exit(1)
+'@
+        $apiOutput = @(wsl -d $DistroName -u root -- docker exec jolia-app python -c $apiProbe 2>&1)
+        $apiExitCode = $LASTEXITCODE
+        if ($apiExitCode -eq 0) {
+            Write-Ok "Ollama-API ist aus dem App-Container erreichbar: $($apiOutput -join ' ')"
+        } else {
+            Write-Fail "Ollama-API-Test aus dem App-Container fehlgeschlagen: $($apiOutput -join ' ')"
+        }
+    } else {
+        Write-Warn2 "Ollama-API-Test aus der App uebersprungen: jolia-app laeuft nicht."
+    }
+
+    Write-Warn2 "HTTP 400 'Bad Request' bedeutet nicht automatisch, dass Ollama fehlt: Modell, Anfrageformat oder Bildunterstuetzung koennen unpassend sein."
+    Write-Host "Die Modellliste/API-Pruefung laedt kein Modell in den RAM und testet keine Inferenz." -ForegroundColor DarkGray
+    foreach ($containerName in @("jolia-ollama-init", "jolia-ollama", "jolia-app")) {
+        Write-Step "Letzte 40 Logzeilen: $containerName"
+        wsl -d $DistroName -u root -- docker logs --tail 40 $containerName 2>&1 | ForEach-Object { Write-Host $_ }
+    }
+    Write-Host "Bei fehlenden Containern/Modellen: Option 1 (installieren oder reparieren) verwenden." -ForegroundColor DarkGray
+}
+
 function Test-JoliaLanAccess {
-    Write-Host "=== JOLIA LAN-Zugriffs-Diagnose ===" -ForegroundColor Cyan
+    Write-Host "=== JOLIA LAN- und Ollama-Diagnose ===" -ForegroundColor Cyan
+
+    # Voraussetzungen fuer Mirrored Networking: Windows 11 22H2 (Build 22621)
+    # und WSL 2.0.9 oder neuer.
+    Write-Host ""
+    Write-Step "Pruefe Windows- und WSL-Version..."
+    try {
+        $windowsVersion = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" -ErrorAction Stop
+        $windowsBuild = [int]$windowsVersion.CurrentBuildNumber
+        $windowsRevision = $windowsVersion.UBR
+        $windowsDisplayVersion = if ($windowsVersion.DisplayVersion) { $windowsVersion.DisplayVersion } else { $windowsVersion.ReleaseId }
+        $windowsProductName = if ($windowsBuild -ge 22000 -and $windowsVersion.ProductName -match '^Windows 10') {
+            $windowsVersion.ProductName -replace '^Windows 10', 'Windows 11'
+        } else {
+            $windowsVersion.ProductName
+        }
+        Write-Host "Windows (wie winver): $windowsProductName, Version $windowsDisplayVersion (Build $windowsBuild.$windowsRevision)"
+        if ($windowsBuild -ge 22621) {
+            Write-Ok "Windows-Build erfuellt die Voraussetzung fuer Mirrored Networking (Windows 11 22H2 oder neuer)."
+        } else {
+            Write-Fail "Windows-Build $windowsBuild ist zu alt fuer Mirrored Networking. Erforderlich ist Windows 11 22H2 (Build 22621) oder neuer."
+        }
+    } catch {
+        Write-Warn2 "Windows-Version konnte nicht ausgelesen werden: $($_.Exception.Message)"
+    }
+
+    $wslVersionOutput = @(wsl.exe --version 2>&1)
+    $wslVersionExitCode = $LASTEXITCODE
+    $normalizedWslVersionOutput = @($wslVersionOutput | ForEach-Object { ([string]$_) -replace "`0", "" })
+    $wslVersionText = $normalizedWslVersionOutput -join "`n"
+    $wslVersionMatch = $null
+    foreach ($line in $normalizedWslVersionOutput) {
+        $match = [regex]::Match($line, 'WSL[\s-]+Version:\s*([0-9]+(?:\.[0-9]+){1,3})', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if ($match.Success) {
+            $wslVersionMatch = $match
+            break
+        }
+    }
+    if ($wslVersionExitCode -eq 0 -and $wslVersionMatch.Success) {
+        $wslVersion = [version]$wslVersionMatch.Groups[1].Value
+        Write-Host "wsl --version: $wslVersion"
+        if ($wslVersion -ge [version]"2.0.9") {
+            Write-Ok "WSL-Version erfuellt die Voraussetzung fuer die Hyper-V-Firewall (2.0.9 oder neuer)."
+        } else {
+            Write-Fail "WSL $wslVersion ist zu alt; erforderlich ist WSL 2.0.9 oder neuer. In einer administrativen PowerShell 'wsl --update' ausfuehren."
+        }
+    } elseif ($wslVersionExitCode -eq 0) {
+        Write-Warn2 "'wsl --version' lieferte keine erkennbare WSL-Paketversion: $wslVersionText"
+        Write-Warn2 "WSL ggf. mit 'wsl --update' aktualisieren und diese Diagnose erneut ausfuehren."
+    } else {
+        Write-Fail "'wsl --version' wird von der installierten WSL-Version nicht unterstuetzt: $wslVersionText"
+        Write-Warn2 "WSL muss aktualisiert werden. In einer administrativen PowerShell 'wsl --update' ausfuehren."
+    }
 
     $distros = (wsl -l -q) -replace "`0", ""
     if ($distros -notcontains $DistroName) {
         Write-Fail "WSL-Distro '$DistroName' ist nicht installiert. Verwende zuerst Option 1."
         return
     }
+
+    Test-JoliaOllama
 
     # 1. Networking-Modus
     $configPath = Join-Path $env:USERPROFILE ".wslconfig"
@@ -684,26 +869,107 @@ function Test-JoliaLanAccess {
         Write-Ok "Mirrored Networking ist in $configPath konfiguriert."
     } else {
         Write-Fail "Mirrored Networking ist NICHT in $configPath konfiguriert. Ohne dieses ist LAN-Zugriff grundsaetzlich nicht moeglich. Mit Option 1 reparieren."
-        return
     }
 
     # 2. Tatsaechliche IP-Adressen vergleichen (erkennt den Fall, dass .wslconfig
     #    zwar korrekt ist, aber seit der letzten Aenderung kein "wsl --shutdown"
     #    mehr lief und die Distro daher noch im alten NAT-Modus laeuft).
-    $wslIp = ((wsl -d $DistroName hostname -I) -join " ").Trim().Split(" ")[0]
-    $hostIps = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-        Where-Object { $_.InterfaceAlias -notmatch "Loopback|vEthernet \(WSL" } |
-        Select-Object -ExpandProperty IPAddress)
-    if ([string]::IsNullOrWhiteSpace($wslIp)) {
-        Write-Fail "Konnte keine IP-Adresse der Distro ermitteln ('wsl hostname -I' lieferte nichts)."
-    } elseif ($hostIps -contains $wslIp) {
-        Write-Ok "Mirrored Networking ist aktiv: WSL nutzt dieselbe LAN-IP wie Windows ($wslIp)."
+    $networkModeOutput = @(wsl -d $DistroName -u root -- wslinfo --networking-mode 2>&1)
+    $networkModeExitCode = $LASTEXITCODE
+    $networkMode = ($networkModeOutput -join " ").Trim()
+    $lanIps = @()
+    try {
+        $lanIps = @(Get-JoliaLanAddresses)
+    } catch {
+        Write-Warn2 "Windows-LAN-Adressen konnten nicht abgefragt werden: $($_.Exception.Message)"
+    }
+    if ($lanIps.Count -eq 0) {
+        Write-Warn2 "Keine aktive physische LAN-Verbindung mit IPv4-Gateway gefunden."
+    }
+    if ($networkModeExitCode -ne 0) {
+        Write-Warn2 "Aktiver WSL-Netzwerkmodus konnte nicht abgefragt werden. WSL aktualisieren; .wslconfig allein beweist keinen aktiven Mirrored-Modus."
+    } elseif ($networkMode -eq "mirrored") {
+        Write-Ok "Mirrored Networking ist tatsaechlich aktiv. Windows-LAN-Adressen: $($lanIps -join ', ')."
     } else {
-        Write-Fail "WSL-IP ($wslIp) stimmt mit keiner Windows-Host-IP ueberein - die Distro laeuft vermutlich noch im alten NAT-Modus."
+        Write-Fail "Aktiver WSL-Netzwerkmodus: $networkMode (erwartet: mirrored)."
         Write-Warn2 "Abhilfe: 'wsl --shutdown' ausfuehren (schliesst alle WSL-Fenster) und JOLIA danach neu starten."
     }
 
-    # 3. Lokale Erreichbarkeit (Windows-Host -> App)
+    # 3. Docker-Container und Portpfad (Container -> WSL -> Windows)
+    Write-Host ""
+    Write-Step "Pruefe Docker-Container und Portweiterleitung..."
+    $container = $null
+    $inspectOutput = @(wsl -d $DistroName -u root -- docker inspect jolia-app 2>&1)
+    $inspectExitCode = $LASTEXITCODE
+    if ($inspectExitCode -ne 0 -or -not $inspectOutput) {
+        Write-Fail "Docker-Container 'jolia-app' wurde nicht gefunden oder Docker antwortet nicht. Ausgabe: $($inspectOutput -join ' ')"
+    } else {
+        try {
+            $container = (ConvertFrom-Json -InputObject ($inspectOutput -join "`n"))[0]
+            if ($container.State.Running) {
+                Write-Ok "Docker-Container '$($container.Name.TrimStart('/'))' laeuft seit $($container.State.StartedAt)."
+            } else {
+                Write-Fail "Docker-Container '$($container.Name.TrimStart('/'))' laeuft nicht (Status: $($container.State.Status), Exit-Code: $($container.State.ExitCode))."
+            }
+
+            if ($container.State.Health) {
+                if ($container.State.Health.Status -eq "healthy") {
+                    Write-Ok "Docker-Healthcheck: healthy."
+                } elseif ($container.State.Health.Status -eq "starting") {
+                    Write-Warn2 "Docker-Healthcheck ist noch 'starting'; der App-Start kann noch laufen."
+                } else {
+                    $healthLog = @($container.State.Health.Log | Where-Object { $_.Output })
+                    $lastHealthOutput = if ($healthLog.Count -gt 0) { $healthLog[-1].Output.Trim() } else { "kein Healthcheck-Log verfuegbar" }
+                    Write-Fail "Docker-Healthcheck: $($container.State.Health.Status). Letzter Healthcheck: $lastHealthOutput"
+                }
+            } else {
+                Write-Warn2 "Der Container hat keinen Docker-Healthcheck konfiguriert."
+            }
+
+            $portBindings = @($container.NetworkSettings.Ports.'8080/tcp' | Where-Object { $_ })
+            $matchingPortBindings = @($portBindings | Where-Object { [int]$_.HostPort -eq $AppPort })
+            $expectedBinding = @($matchingPortBindings | Where-Object { $_.HostIp -notmatch '^(127\.|::1$)' })
+            if ($expectedBinding.Count -gt 0) {
+                $bindingText = ($expectedBinding | ForEach-Object { "$($_.HostIp):$($_.HostPort) -> container:8080/tcp" }) -join ", "
+                Write-Ok "Docker-Portbindung stimmt: $bindingText."
+            } elseif ($matchingPortBindings.Count -gt 0) {
+                $bindingText = ($matchingPortBindings | ForEach-Object { "$($_.HostIp):$($_.HostPort)" }) -join ", "
+                Write-Fail "Docker-Port $AppPort ist nur lokal gebunden ($bindingText); andere Geraete im LAN koennen ihn so nicht erreichen."
+            } else {
+                $actualBindings = if ($portBindings.Count -gt 0) {
+                    ($portBindings | ForEach-Object { "$($_.HostIp):$($_.HostPort)" }) -join ", "
+                } else {
+                    "keine Bindung fuer 8080/tcp"
+                }
+                Write-Fail "Docker leitet Container-Port 8080/tcp nicht auf Host-Port $AppPort weiter (gefunden: $actualBindings)."
+            }
+        } catch {
+            Write-Fail "Docker-Inspektionsdaten konnten nicht ausgewertet werden: $($_.Exception.Message)"
+            $container = $null
+        }
+    }
+
+    if ($container -and $container.State.Running) {
+        $containerHealthOutput = @(wsl -d $DistroName -u root -- docker exec jolia-app python -c "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5); print('HTTP', r.status, r.read().decode())" 2>&1)
+        $containerHealthExitCode = $LASTEXITCODE
+        if ($containerHealthExitCode -eq 0) {
+            Write-Ok "HTTP-Test direkt im Container auf 127.0.0.1:8080 erfolgreich: $($containerHealthOutput -join ' ')."
+        } else {
+            Write-Fail "HTTP-Test direkt im Container auf 127.0.0.1:8080 fehlgeschlagen: $($containerHealthOutput -join ' ')"
+        }
+
+        $wslPortOutput = @(wsl -d $DistroName -u root -- python3 -c "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:$AppPort/health', timeout=5); print('HTTP', r.status, r.read().decode())" 2>&1)
+        $wslPortExitCode = $LASTEXITCODE
+        if ($wslPortExitCode -eq 0) {
+            Write-Ok "HTTP-Test in WSL auf dem veroeffentlichten Port 127.0.0.1:$AppPort erfolgreich: $($wslPortOutput -join ' ')."
+        } else {
+            Write-Fail "Container antwortet moeglicherweise intern, aber WSL-Port 127.0.0.1:$AppPort ist nicht erreichbar: $($wslPortOutput -join ' ')"
+        }
+    } elseif ($container) {
+        Write-Warn2 "Interne HTTP-Tests uebersprungen, da der Container nicht laeuft."
+    }
+
+    # 4. Lokale Erreichbarkeit (Windows-Host -> App)
     $localOk = $false
     try {
         $response = Invoke-WebRequest -Uri "http://localhost:$AppPort/health" -UseBasicParsing -TimeoutSec 5
@@ -716,12 +982,12 @@ function Test-JoliaLanAccess {
     # 4. Erreichbarkeit ueber die LAN-IP, aber noch vom selben Windows-Host aus.
     #    Das grenzt "App bindet falsch" von "nur die Firewall blockiert externe
     #    Verbindungen" sauber voneinander ab.
-    if ($localOk -and -not [string]::IsNullOrWhiteSpace($wslIp)) {
+    foreach ($lanIp in $lanIps) {
         try {
-            $response = Invoke-WebRequest -Uri "http://${wslIp}:$AppPort/health" -UseBasicParsing -TimeoutSec 5
-            Write-Ok "JOLIA antwortet unter der LAN-IP http://${wslIp}:$AppPort (HTTP $($response.StatusCode)) - vom Windows-Host aus getestet."
+            $response = Invoke-WebRequest -Uri "http://${lanIp}:$AppPort/health" -UseBasicParsing -TimeoutSec 5
+            Write-Ok "JOLIA antwortet unter der LAN-IP http://${lanIp}:$AppPort (HTTP $($response.StatusCode)) - vom Windows-Host aus getestet."
         } catch {
-            Write-Fail "JOLIA antwortet lokal, aber NICHT unter der LAN-IP http://${wslIp}:$AppPort - selbst vom Windows-Host aus. Das deutet auf ein Firewall-Problem auf diesem Rechner hin (siehe naechste Punkte)."
+            Write-Warn2 "Host-Test auf http://${lanIp}:$AppPort fehlgeschlagen. Mirrored Networking erlaubt Zugriffe vom Host auf seine eigene LAN-IP nicht immer; dieser Test beweist keine LAN-Firewallblockade. Der Test von einem zweiten Geraet ist entscheidend."
         }
     }
 
@@ -796,9 +1062,9 @@ function Test-JoliaLanAccess {
     Write-Host "  - Firmen-/Schul-Notebook mit zentral verwalteter Firewall-Policy (GPO/Intune)" -ForegroundColor DarkGray
     Write-Host ""
 
-    if (-not [string]::IsNullOrWhiteSpace($wslIp)) {
+    foreach ($lanIp in $lanIps) {
         Write-Step "Teste jetzt von einem ANDEREN Geraet im selben Netzwerk im Browser:"
-        Write-Host "  http://${wslIp}:$AppPort" -ForegroundColor Green
+        Write-Host "  http://${lanIp}:$AppPort" -ForegroundColor Green
     }
 }
 
@@ -910,7 +1176,7 @@ Write-Host "  3: Autostart aktivieren/deaktivieren (Installation bleibt erhalten
 Write-Host "  4: JOLIA vollständig deinstallieren"
 Write-Host "  5: Status prüfen"
 Write-Host "  6: FRITZ!Box-Zugang oder lokalen Speicherordner ändern"
-Write-Host "  7: LAN-Zugriff testen/diagnostizieren (warum ist JOLIA im Heimnetz nicht erreichbar?)"
+Write-Host "  7: LAN-Zugriff und Ollama diagnostizieren (Container, Modelle, API und Logs)"
 $choice = Read-Host "Bitte Auswahl eingeben (1-7)"
 
 switch ($choice) {
@@ -979,8 +1245,8 @@ switch ($choice) {
 Write-Step "Prüfe Systemvoraussetzungen..."
 
 $build = [System.Environment]::OSVersion.Version.Build
-if ($build -lt 19041) {
-    Write-Fail "Windows-Build $build wird nicht unterstützt (WSL2 benötigt mindestens Build 19041)."
+if ($build -lt 22621) {
+    Write-Fail "Windows-Build $build wird nicht unterstuetzt (LAN-Zugriff via Mirrored Networking benoetigt Windows 11 22H2, Build 22621 oder neuer)."
     Exit-Fail
 }
 Write-Ok "Windows-Build $build OK."
@@ -1156,8 +1422,24 @@ if (-not $distroExists) {
 }
 
 Set-WslConf -Distro $DistroName
+$activeNetworkMode = @(wsl -d $DistroName -u root -- wslinfo --networking-mode 2>&1)
+if ($LASTEXITCODE -eq 0) {
+    if (($activeNetworkMode -join " ").Trim() -ne "mirrored") {
+        Write-Fail "WSL verwendet nicht den benoetigten Mirrored-Modus: $($activeNetworkMode -join ' ')."
+        Write-Warn2 "Andere WSL-Arbeit speichern, 'wsl --shutdown' ausfuehren und Option 1 erneut starten."
+        Exit-Fail
+    }
+    Write-Ok "WSL verwendet tatsaechlich Mirrored Networking."
+} else {
+    Write-Warn2 "Aktiver Netzwerkmodus konnte nicht geprueft werden. WSL mit 'wsl --update' aktualisieren; LAN-Erreichbarkeit bleibt unverifiziert."
+}
 if ($StorageMode -eq "FritzNas") {
     Mount-FritzNasShares -Distro $DistroName
+    wsl -d $DistroName -u root -- bash -c "mountpoint -q $FritzNasUploadMount && mountpoint -q $FritzNasBackupMount"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "FRITZ!NAS ist nicht eingebunden. Installation abgebrochen; mit Option 6 Zugangsdaten oder lokalen Speicher konfigurieren."
+        Exit-Fail
+    }
 } else {
     New-Item -ItemType Directory -Path (Join-Path $LocalStorageRoot "inbox"), (Join-Path $LocalStorageRoot "backup") -Force | Out-Null
     Write-Ok "Verwende lokalen Speicherordner $LocalStorageRoot."
@@ -1208,7 +1490,13 @@ if ($buildxCheck.Trim() -ne "yes") {
     Write-Ok "Docker Buildx bereits vorhanden."
 }
 
-wsl -d $DistroName -u root -- bash -c "systemctl enable --now docker >/dev/null 2>&1 || service docker start" | Out-Null
+$composeCheck = wsl -d $DistroName -u root -- bash -c "docker compose version >/dev/null 2>&1 && echo yes || echo no"
+if (($composeCheck -join "").Trim() -ne "yes") {
+    wsl -d $DistroName -u root -- bash -c "export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y docker-compose-v2"
+    if ($LASTEXITCODE -ne 0) { Write-Fail "Docker Compose konnte nicht installiert werden."; Exit-Fail }
+}
+wsl -d $DistroName -u root -- bash -c "(systemctl enable --now docker || service docker start) && docker info >/dev/null && docker compose version"
+if ($LASTEXITCODE -ne 0) { Write-Fail "Docker Engine/Compose ist nicht einsatzbereit."; Exit-Fail }
 
 # ── Phase 5: App-Deployment ─────────────────────────────────────────────────
 Write-Step "Hole JOLIA-Code..."
@@ -1220,11 +1508,9 @@ if (-not (Sync-JoliaRepo -Distro $DistroName -AppDir $AppDirLinux -Repo $RepoUrl
 Write-Ok "JOLIA-Code aktuell."
 
 Write-Step "Konfiguriere JOLIA (Port, Datenordner)..."
-wsl -d $DistroName -u root -- bash -c "mkdir -p $ArchiveLinux"
-Set-JoliaEnvVar -Distro $DistroName -AppDir $AppDirLinux -Key "JOLIA_PORT" -Value $AppPort
-Set-JoliaEnvVar -Distro $DistroName -AppDir $AppDirLinux -Key "JOLIA_INBOX" -Value $JoliaInboxLinux
-Set-JoliaEnvVar -Distro $DistroName -AppDir $AppDirLinux -Key "JOLIA_ARCHIVE" -Value $ArchiveLinux
-Set-JoliaEnvVar -Distro $DistroName -AppDir $AppDirLinux -Key "JOLIA_BACKUP" -Value $JoliaBackupLinux
+Set-JoliaDeploymentConfig -Distro $DistroName
+wsl -d $DistroName -u root -- bash -c "cd $AppDirLinux && docker compose config --quiet"
+if ($LASTEXITCODE -ne 0) { Write-Fail "Die Docker-Compose-Konfiguration ist ungueltig."; Exit-Fail }
 if ($StorageMode -eq "FritzNas") {
     Write-Ok "Upload/Backup ueber FRITZ!NAS ($JoliaInboxLinux / $JoliaBackupLinux), Archiv nativ in WSL ($ArchiveLinux, schnell)."
 } else {
@@ -1258,6 +1544,10 @@ if ($LASTEXITCODE -ne 0) {
     Exit-Fail
 }
 
+Write-Step "Registriere Autostart und halte WSL waehrend des App-Starts aktiv..."
+Register-JoliaAutostart
+Save-JoliaStorageSettings
+
 Write-Step "Warte auf JOLIA (kann beim ersten Start mehrere Minuten dauern)..."
 $healthy = $false
 for ($i = 0; $i -lt 60; $i++) {
@@ -1270,14 +1560,10 @@ for ($i = 0; $i -lt 60; $i++) {
 if ($healthy) {
     Write-Ok "JOLIA läuft."
 } else {
-    Write-Warn2 "JOLIA antwortet noch nicht - Modell-Download/Build läuft evtl. im Hintergrund weiter."
-    Write-Warn2 "Status prüfen mit: wsl -d $DistroName -u root -- bash -c `"cd $AppDirLinux && docker compose logs -f`""
+    Write-Fail "JOLIA antwortet nach dem Start nicht. Die Installation ist nicht als erfolgreich verifiziert."
+    Test-JoliaOllama
+    Exit-Fail
 }
-
-# ── Phase 6: Autostart bei Windows-Login ───────────────────────────────────
-Write-Step "Registriere Autostart..."
-Register-JoliaAutostart
-Save-JoliaStorageSettings
 
 Write-Host ""
 Write-Host "=== Fertig ===" -ForegroundColor Cyan
