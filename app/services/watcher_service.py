@@ -41,8 +41,8 @@ def is_file_stable(path: Path, min_age_seconds: float = 30.0) -> bool:
     """
     try:
         stat = path.stat()
-        age = time.time() - stat.st_mtime
-        if age < min_age_seconds:
+        # Bei min_age <= 0 kein mtime-Vergleich: Netzlaufwerke (NAS) setzen mtime mit eigener, ggf. vorgehender Uhr.
+        if min_age_seconds > 0 and time.time() - stat.st_mtime < min_age_seconds:
             return False
         # Sekundärcheck: Datei lesend öffnen – schlägt fehl bei aktiver Schreibsperre
         with open(path, "rb"):
@@ -154,6 +154,10 @@ async def _watcher_loop(cfg: Config) -> None:
         except asyncio.CancelledError:
             logger.info("Inbox-Watcher wird beendet.")
             raise
+        except OSError as exc:
+            logger.warning(
+                "Watcher: Inbox nicht erreichbar (%s) – nächster Scan in %ds.", exc, interval
+            )
         except Exception:
             logger.exception(
                 "Watcher: Unerwarteter Fehler – nächster Scan in %ds.", interval

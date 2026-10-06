@@ -790,7 +790,13 @@ except Exception as error:
     Write-Host "Die Modellliste/API-Pruefung laedt kein Modell in den RAM und testet keine Inferenz." -ForegroundColor DarkGray
     foreach ($containerName in @("jolia-ollama-init", "jolia-ollama", "jolia-app")) {
         Write-Step "Letzte 40 Logzeilen: $containerName"
-        wsl -d $DistroName -u root -- docker logs --tail 40 $containerName 2>&1 | ForEach-Object { Write-Host $_ }
+        $previousEncoding = [Console]::OutputEncoding
+        try {
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+            wsl -d $DistroName -u root -- docker logs --tail 40 $containerName 2>&1 | ForEach-Object { Write-Host "$_" }
+        } finally {
+            [Console]::OutputEncoding = $previousEncoding
+        }
     }
     Write-Host "Bei fehlenden Containern/Modellen: Option 1 (installieren oder reparieren) verwenden." -ForegroundColor DarkGray
 }

@@ -10,8 +10,6 @@ Kommerzielle Nutzung ist nicht gestattet. Dazu zählt insbesondere der Einsatz i
 
 PolyForm Noncommercial beschränkt die Nutzungsfelder und ist daher **keine OSI-anerkannte Open-Source-Lizenz**. JOLIA ist unter diesen Bedingungen source-available, aber nicht „Open Source“ im Sinne der Open Source Definition.
 
-**Frühere MIT-Fassung:** Vor dem History-Reset war eine Entwicklungsfassung öffentlich mit MIT-Lizenz erreichbar. Laut Maintainer wurde JOLIA bis zum Lizenzwechsel von niemandem genutzt. Der Reset entfernt die alten Commits aus der sichtbaren `main`-Historie, kann aber nicht nachweisen, dass niemand eine Kopie behalten hat. Wer eine frühere MIT-Kopie erhalten hat, kann sich weiterhin auf die damals gewährten MIT-Rechte berufen.
-
 Drittanbieter-Code und Modellgewichte unterliegen weiterhin ihren jeweils eigenen Bedingungen. Sie werden durch die JOLIA-Lizenz weder ersetzt noch erweitert. Siehe [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) und [LICENSE-OpenCV-4.9.0.txt](LICENSE-OpenCV-4.9.0.txt).
 
 ### AI-Unterstützung
