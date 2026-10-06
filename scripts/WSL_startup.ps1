@@ -304,7 +304,7 @@ function Show-JoliaStatus {
         Write-Host "Speicher: FRITZ!NAS als Benutzer '$FritzNasUser'" -ForegroundColor Green
     }
     try {
-        $response = Invoke-WebRequest -Uri "http://localhost:$AppPort/health" -UseBasicParsing -TimeoutSec 5
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$AppPort/health" -UseBasicParsing -TimeoutSec 5
         Write-Ok "JOLIA antwortet unter http://localhost:$AppPort (HTTP $($response.StatusCode))."
     } catch {
         Write-Warn2 "JOLIA antwortet derzeit nicht unter http://localhost:$AppPort."
@@ -455,7 +455,7 @@ function Get-JoliaLanAddresses {
 }
 
 function Show-JoliaAccessUrls ($Distro) {
-    Write-Host "JOLIA Docs: http://localhost:$AppPort" -ForegroundColor Green
+    Write-Host "JOLIA Docs: http://127.0.0.1:$AppPort" -ForegroundColor Green
     try {
         foreach ($lanIp in @(Get-JoliaLanAddresses)) {
             Write-Host "Aus dem Heimnetz (Mirrored Networking): http://${lanIp}:$AppPort" -ForegroundColor Green
@@ -468,10 +468,10 @@ function Show-JoliaAccessUrls ($Distro) {
 # Setzt/aktualisiert einen einzelnen Schluessel in der .env-Datei der App (idempotent).
 function Set-JoliaEnvVar ($Distro, $AppDir, $Key, $Value) {
     $lineB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes("$Key=$Value`n"))
-    $cmd = "set -e; touch $AppDir/.env; grep -v '^$Key=' $AppDir/.env > $AppDir/.env.tmp || [ `$? -eq 1 ]; echo $lineB64 | base64 -d >> $AppDir/.env.tmp; mv $AppDir/.env.tmp $AppDir/.env"
-    wsl -d $Distro -u root -- bash -c $cmd
+    $cmd = "set -e; set -o pipefail; touch $AppDir/.env; sed '/^$Key=/d' $AppDir/.env > $AppDir/.env.tmp; echo $lineB64 | base64 -d >> $AppDir/.env.tmp; mv $AppDir/.env.tmp $AppDir/.env"
+    $output = @(wsl -d $Distro -u root -- bash -c $cmd 2>&1)
     if ($LASTEXITCODE -ne 0) {
-        throw "Die JOLIA-Konfiguration '$Key' konnte nicht gespeichert werden."
+        throw "Die JOLIA-Konfiguration '$Key' konnte nicht gespeichert werden: $($output -join ' ')"
     }
 }
 
@@ -695,6 +695,7 @@ function Set-JoliaFirewallRule {
 # Netzwerkprofil (Privat/Oeffentlich) und optional einen echten Verbindungstest
 # von einem zweiten Geraet.
 function Test-JoliaOllama {
+    $ErrorActionPreference = "Continue"
     Write-Host ""
     Write-Step "Pruefe Ollama-Container, Modelle und Verbindung aus der App..."
     Write-Host "Ollama laeuft als Docker-Container innerhalb von '$DistroName', nicht als eigene WSL-Distro." -ForegroundColor DarkGray
@@ -747,7 +748,8 @@ function Test-JoliaOllama {
             Write-Ok "Ollama antwortet auf 'ollama list'. Installierte Modelle:"
             $modelOutput | ForEach-Object { Write-Host $_ }
             foreach ($model in @("qwen2.5:1.5b", "qwen2.5:7b", "qwen2.5vl:3b", "bge-m3")) {
-                if (($modelOutput -join "`n") -notmatch "(?m)^\s*$([regex]::Escape($model))\s") {
+                $modelTag = if ($model.Contains(':')) { '' } else { '(?::latest)?' }
+                if (($modelOutput -join "`n") -notmatch "(?m)^\s*$([regex]::Escape($model))$modelTag\s") {
                     Write-Warn2 "Standardmodell '$model' fehlt. Modell-Download/Init-Logs pruefen."
                 }
             }
@@ -972,11 +974,11 @@ function Test-JoliaLanAccess {
     # 4. Lokale Erreichbarkeit (Windows-Host -> App)
     $localOk = $false
     try {
-        $response = Invoke-WebRequest -Uri "http://localhost:$AppPort/health" -UseBasicParsing -TimeoutSec 5
-        Write-Ok "JOLIA antwortet lokal unter http://localhost:$AppPort (HTTP $($response.StatusCode))."
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$AppPort/health" -UseBasicParsing -TimeoutSec 5
+        Write-Ok "JOLIA antwortet lokal unter http://127.0.0.1:$AppPort (HTTP $($response.StatusCode))."
         $localOk = $true
     } catch {
-        Write-Fail "JOLIA antwortet nicht einmal lokal unter http://localhost:$AppPort. Pruefe mit Option 5/Docker, ob der Container laeuft, bevor du LAN-Zugriff testest."
+        Write-Fail "JOLIA antwortet nicht einmal lokal unter http://127.0.0.1:$AppPort. Pruefe mit Option 5/Docker, ob der Container laeuft, bevor du LAN-Zugriff testest."
     }
 
     # 4. Erreichbarkeit ueber die LAN-IP, aber noch vom selben Windows-Host aus.
@@ -1550,18 +1552,22 @@ Save-JoliaStorageSettings
 
 Write-Step "Warte auf JOLIA (kann beim ersten Start mehrere Minuten dauern)..."
 $healthy = $false
+$lastHealthError = "Keine HTTP-200-Antwort erhalten."
 for ($i = 0; $i -lt 60; $i++) {
     try {
-        $resp = Invoke-WebRequest -Uri "http://localhost:$AppPort/health" -UseBasicParsing -TimeoutSec 5
+        $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$AppPort/health" -UseBasicParsing -TimeoutSec 5
         if ($resp.StatusCode -eq 200) { $healthy = $true; break }
-    } catch { }
+        $lastHealthError = "HTTP $($resp.StatusCode)"
+    } catch { $lastHealthError = $_.Exception.Message }
     Start-Sleep -Seconds 10
 }
 if ($healthy) {
     Write-Ok "JOLIA läuft."
 } else {
     Write-Fail "JOLIA antwortet nach dem Start nicht. Die Installation ist nicht als erfolgreich verifiziert."
+    Write-Fail "Letzter Windows-HTTP-Test auf http://127.0.0.1:$AppPort/health : $lastHealthError"
     Test-JoliaOllama
+    Write-Warn2 "Bei gesundem App-Container: Menueoption 7 prueft den Portpfad Container -> WSL -> Windows und die Firewall."
     Exit-Fail
 }
 
