@@ -158,6 +158,8 @@ def test_describe_image_sends_normalized_jpeg(monkeypatch, tmp_path):
 
     assert result == "Bild"
     assert base64.b64decode(captured["images"][0]) == b"normalized-jpeg"
+    assert captured["options"]["num_ctx"] == 8192
+    assert captured["options"]["num_predict"] == 2048
 
 
 def test_describe_image_includes_ollama_error_detail(monkeypatch, tmp_path):
@@ -197,8 +199,10 @@ def test_describe_image_includes_ollama_error_detail(monkeypatch, tmp_path):
     image_path = tmp_path / "test.jpg"
     image_path.write_bytes(b"image")
     detail = '{"error":"image decode failed"}'
+    calls = []
 
     def post(url, **_kwargs):
+        calls.append(url)
         return httpx.Response(
             400,
             text=detail,
@@ -212,3 +216,138 @@ def test_describe_image_includes_ollama_error_detail(monkeypatch, tmp_path):
             str(image_path),
             model="qwen2.5vl:3b",
         )
+    assert calls == ["http://ollama:11434/api/generate"]
+
+
+def test_describe_image_increases_context_after_context_overflow(monkeypatch, tmp_path):
+    class FakeImage:
+        mode = "RGB"
+        info = {}
+        size = (64, 64)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def thumbnail(self, *_args):
+            pass
+
+        def convert(self, _mode):
+            return self
+
+        def save(self, target, **_kwargs):
+            target.write(b"normalized-jpeg")
+
+    pil_module = ModuleType("PIL")
+    image_module = ModuleType("PIL.Image")
+    image_module.open = lambda _path: FakeImage()
+    image_module.new = lambda *_args, **_kwargs: FakeImage()
+    image_module.Resampling = type("Resampling", (), {"LANCZOS": 1})
+    image_ops_module = ModuleType("PIL.ImageOps")
+    image_ops_module.exif_transpose = lambda image: image
+    pil_module.Image = image_module
+    pil_module.ImageOps = image_ops_module
+    monkeypatch.setitem(sys.modules, "PIL", pil_module)
+    monkeypatch.setitem(sys.modules, "PIL.Image", image_module)
+    monkeypatch.setitem(sys.modules, "PIL.ImageOps", image_ops_module)
+
+    image_path = tmp_path / "test.jpg"
+    image_path.write_bytes(b"image")
+    context_sizes = []
+    responses = iter(
+        [
+            httpx.Response(
+                400,
+                json={
+                    "error": (
+                        '{"error":{"code":400,"message":"request (9000 tokens) exceeds '
+                        'the available context size (8192)","type":"exceed_context_size_error"}}'
+                    )
+                },
+                request=httpx.Request("POST", "http://ollama:11434/api/generate"),
+            ),
+            httpx.Response(
+                200,
+                json={"response": "Bild erkannt"},
+                request=httpx.Request("POST", "http://ollama:11434/api/generate"),
+            ),
+        ]
+    )
+
+    def post(url, *, json, **_kwargs):
+        context_sizes.append(json["options"]["num_ctx"])
+        return next(responses)
+
+    monkeypatch.setattr("app.services.ollama_service.httpx.post", post)
+
+    answer = OllamaService("http://ollama:11434", "qwen2.5vl:3b").describe_image(
+        str(image_path),
+        model="qwen2.5vl:3b",
+    )
+
+    assert answer == "Bild erkannt"
+    assert context_sizes == [8192, 12288]
+
+
+def test_describe_image_stops_after_maximum_context_overflows(monkeypatch, tmp_path):
+    class FakeImage:
+        mode = "RGB"
+        info = {}
+        size = (64, 64)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def thumbnail(self, *_args):
+            pass
+
+        def convert(self, _mode):
+            return self
+
+        def save(self, target, **_kwargs):
+            target.write(b"normalized-jpeg")
+
+    pil_module = ModuleType("PIL")
+    image_module = ModuleType("PIL.Image")
+    image_module.open = lambda _path: FakeImage()
+    image_module.new = lambda *_args, **_kwargs: FakeImage()
+    image_module.Resampling = type("Resampling", (), {"LANCZOS": 1})
+    image_ops_module = ModuleType("PIL.ImageOps")
+    image_ops_module.exif_transpose = lambda image: image
+    pil_module.Image = image_module
+    pil_module.ImageOps = image_ops_module
+    monkeypatch.setitem(sys.modules, "PIL", pil_module)
+    monkeypatch.setitem(sys.modules, "PIL.Image", image_module)
+    monkeypatch.setitem(sys.modules, "PIL.ImageOps", image_ops_module)
+
+    image_path = tmp_path / "test.jpg"
+    image_path.write_bytes(b"image")
+    context_sizes = []
+
+    def post(url, *, json, **_kwargs):
+        context_sizes.append(json["options"]["num_ctx"])
+        return httpx.Response(
+            400,
+            json={
+                "error": (
+                    '{"error":{"message":"request exceeds the available context size",'
+                    '"type":"exceed_context_size_error"}}'
+                )
+            },
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr("app.services.ollama_service.httpx.post", post)
+
+    with pytest.raises(httpx.HTTPStatusError, match="exceed_context_size_error"):
+        OllamaService("http://ollama:11434", "qwen2.5vl:3b").describe_image(
+            str(image_path),
+            model="qwen2.5vl:3b",
+        )
+
+    assert context_sizes == [8192, 12288, 16384]

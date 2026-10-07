@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 _POST_ATTEMPTS = 3
 _RETRY_DELAYS = (0.5, 1.0)
+_VISION_CONTEXT_SIZES = (8192, 12288, 16384)
 
 
 class OllamaService:
@@ -78,6 +79,21 @@ class OllamaService:
                     response=response,
                 ) from exc
             raise
+
+    @staticmethod
+    def _is_context_overflow(response: httpx.Response) -> bool:
+        if response.status_code != 400:
+            return False
+        error_text = response.text.lower()
+        return any(
+            marker in error_text
+            for marker in (
+                "exceed_context_size_error",
+                "exceeds the available context size",
+                "context length exceeded",
+                "input length exceeds",
+            )
+        )
 
     def generate(self, prompt: str, system: str | None = None) -> str:
         payload: dict = {
@@ -182,28 +198,38 @@ class OllamaService:
                 "Trenne Beschreibung und extrahierten Text mit '--- TEXT ---'."
             )
 
-        r = self._post(
-            f"{self.base_url}/api/generate",
-            {
-                "model": model,
-                "prompt": prompt,
-                "images": [image_b64],
-                "stream": False,
-                "options": {
-                    # Niedrige Temperatur für faktentreue, reproduzierbare Analyse
-                    "temperature": 0.1,
-                    "top_p": 0.9,
-                    # Genug Tokens, damit auch lange Texte vollständig transkribiert werden
-                    "num_predict": 2048,
-                    # Großes Kontextfenster für detaillierte, vollständige Antworten
-                    "num_ctx": 4096,
-                },
-                "keep_alive": self.keep_alive,
-            },
-            timeout=self.timeout,
-        )
-        self._raise_for_status(r)
-        return r.json().get("response", "")
+        options: dict[str, float | int] = {
+            "temperature": 0.1,
+            "top_p": 0.9,
+            "num_predict": 2048,
+            "num_ctx": _VISION_CONTEXT_SIZES[0],
+        }
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "images": [image_b64],
+            "stream": False,
+            "options": options,
+            "keep_alive": self.keep_alive,
+        }
+        url = f"{self.base_url}/api/generate"
+        for index, context_size in enumerate(_VISION_CONTEXT_SIZES):
+            options["num_ctx"] = context_size
+            r = self._post(url, payload, timeout=self.timeout)
+            if self._is_context_overflow(r) and index < len(_VISION_CONTEXT_SIZES) - 1:
+                next_context_size = _VISION_CONTEXT_SIZES[index + 1]
+                logger.warning(
+                    "Ollama-Vision-Kontext zu klein (Modell %s, num_ctx=%d); "
+                    "wiederhole mit num_ctx=%d.",
+                    model,
+                    context_size,
+                    next_context_size,
+                )
+                continue
+            self._raise_for_status(r)
+            return r.json().get("response", "")
+
+        raise RuntimeError("Ollama-Vision-Anfrage endete unerwartet ohne Antwort.")
 
 
 _service: OllamaService | None = None
