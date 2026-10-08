@@ -1,18 +1,44 @@
 <script>
 var FILE_ID = '{{ file.id }}';
 
+function updateSaveButtonState(input, button) {
+    button.hidden = input.value === button.dataset.savedValue;
+}
+
+function markInputSaved(input, button, savedValue = input.value) {
+    button.dataset.savedValue = savedValue;
+    updateSaveButtonState(input, button);
+}
+
+function trackChanges(inputId, buttonId) {
+    const input = document.getElementById(inputId);
+    const button = document.getElementById(buttonId);
+    if (!input || !button) return;
+    button.dataset.savedValue = input.value;
+    const updateState = () => updateSaveButtonState(input, button);
+    input.addEventListener('input', updateState);
+    input.addEventListener('change', updateState);
+}
+
+trackChanges('file-short-summary-text', 'file-short-summary-save');
+trackChanges('file-summary-text', 'file-summary-save');
+trackChanges('file-date-input', 'file-date-save');
+
 async function saveFileSummary() {
     const textarea = document.getElementById('file-summary-text');
+    const button = document.getElementById('file-summary-save');
     const result = document.getElementById('file-summary-result');
+    const summary = textarea.value;
     try {
         const r = await fetch(`/api/files/${FILE_ID}/summary`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ summary: textarea.value })
+            body: JSON.stringify({ summary })
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data.detail || 'Fehler beim Speichern');
         result.innerHTML = `<p class="success">✅ ${escapeHtml(data.message)}</p>`;
+        markInputSaved(textarea, button, summary);
     } catch (e) {
         result.innerHTML = `<p class="error">❌ ${escapeHtml(e.message)}</p>`;
     }
@@ -20,16 +46,19 @@ async function saveFileSummary() {
 
 async function saveFileShortSummary() {
     const textarea = document.getElementById('file-short-summary-text');
+    const button = document.getElementById('file-short-summary-save');
     const result = document.getElementById('file-short-summary-result');
+    const summary = textarea.value;
     try {
         const r = await fetch(`/api/files/${FILE_ID}/short-summary`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ summary: textarea.value })
+            body: JSON.stringify({ summary })
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data.detail || 'Fehler beim Speichern');
         result.innerHTML = `<p class="success">✅ ${escapeHtml(data.message)}</p>`;
+        markInputSaved(textarea, button, summary);
     } catch (e) {
         result.innerHTML = `<p class="error">❌ ${escapeHtml(e.message)}</p>`;
     }
@@ -37,20 +66,23 @@ async function saveFileShortSummary() {
 
 async function saveFileDate() {
     const input = document.getElementById('file-date-input');
+    const button = document.getElementById('file-date-save');
     const result = document.getElementById('file-date-result');
     if (!input.value) {
         result.innerHTML = '<p class="error">❌ Bitte ein Datum auswählen.</p>';
         return;
     }
+    const date = input.value;
     try {
         const r = await fetch(`/api/files/${FILE_ID}/date`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ date: input.value })
+            body: JSON.stringify({ date })
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data.detail || 'Fehler beim Speichern');
         result.innerHTML = `<p class="success">✅ ${escapeHtml(data.message)}</p>`;
+        markInputSaved(input, button, date);
     } catch (e) {
         result.innerHTML = `<p class="error">❌ ${escapeHtml(e.message)}</p>`;
     }

@@ -7,11 +7,7 @@
     </div>
     {% endif %}
 
-    {% if file.short_summary %}
-    <div class="ai-summary-banner">
-        🤖 <strong>Kurzzusammenfassung:</strong> {{ file.short_summary }}
-    </div>
-    {% elif is_previewable_without_thumb %}
+    {% if is_previewable_without_thumb %}
     <div class="ai-summary-banner file-preview-placeholder">
         {{ '🎵' if file.content_type == 'audio' else '🎬' if file.content_type == 'video' else '🔍' }} Vorschau anzeigen
     </div>
@@ -30,14 +26,13 @@
 <div class="grid">
     <div>
         <h1>{{ file.short_summary or file.original_filename }}</h1>
-        <p><small>Originaldatei: {{ file.original_filename }}</small></p>
 
         <article id="summary-section">
             <label for="file-short-summary-text"><strong>Kurzzusammenfassung (2–5 Wörter)</strong></label>
             <textarea id="file-short-summary-text" rows="2" maxlength="200" style="width:100%"
                       placeholder="Kurze Zusammenfassung…">{{ file.short_summary or file.original_filename }}</textarea>
             <div style="display:flex;gap:.5rem;margin-top:.5rem">
-                <button type="button" onclick="saveFileShortSummary()" title="Kurzzusammenfassung speichern">💾 Kurzfassung speichern</button>
+                <button id="file-short-summary-save" type="button" onclick="saveFileShortSummary()" title="Kurzzusammenfassung speichern" hidden>💾 Kurzfassung speichern</button>
             </div>
             <div id="file-short-summary-result" role="status"></div>
         </article>
@@ -47,7 +42,7 @@
             <textarea id="file-summary-text" rows="5" maxlength="400" style="width:100%"
                       placeholder="Ausführliche Beschreibung…">{{ file.ai_summary if file.ai_summary and file.ai_summary != file.original_filename else '' }}</textarea>
             <div style="display:flex;gap:.5rem;margin-top:.5rem">
-                <button type="button" onclick="saveFileSummary()" title="Beschreibung speichern">💾 Beschreibung speichern</button>
+                <button id="file-summary-save" type="button" onclick="saveFileSummary()" title="Beschreibung speichern" hidden>💾 Beschreibung speichern</button>
             </div>
             <div id="file-summary-result" role="status"></div>
         </article>
@@ -58,9 +53,8 @@
                 <input id="file-date-input" type="date" required
                        value="{{ (file.created_at or file.imported_at)[:10] if file.created_at or file.imported_at else '' }}"
                        aria-label="Datum in der Timeline">
-                <button type="button" onclick="saveFileDate()" title="Datum speichern">💾 Speichern</button>
+                <button id="file-date-save" type="button" onclick="saveFileDate()" title="Datum speichern" hidden>💾 Speichern</button>
             </div>
-            <small>Dieses Datum bestimmt die Sortierung in der Timeline.</small>
             <div id="file-date-result" role="status"></div>
         </article>
 
@@ -71,7 +65,7 @@
             <tr><th>Importiert</th><td>{{ file.imported_at[:16] if file.imported_at else '–' }}</td></tr>
             <tr><th>Verarbeitet</th><td>{{ file.processed_at[:16] if file.processed_at else '–' }}</td></tr>
             <tr><th>SHA256</th><td><small>{{ file.sha256 }}</small></td></tr>
-            <tr><th>Gespeichert als (GUID)</th><td><small>{{ file.archive_path.replace('\\', '/').split('/')[-1] }}</small></td></tr>
+            <tr><th>Originaldatei</th><td><small>{{ file.original_filename }}</small></td></tr>
             <tr><th>Archivpfad</th><td><small>{{ file.archive_path }}</small></td></tr>
         </table>
 
