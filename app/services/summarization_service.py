@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
 _MAX_SUMMARY_LEN = 300
-_MAX_DOCUMENT_SUMMARY_LEN = 100
+_MAX_SHORT_SUMMARY_WORDS = 5
 _INPUT_LIMIT = 6000  # Maximale Eingabe für den Prompt (Text kommt bereits über das ganze Dokument gesampelt)
 
 
@@ -57,12 +58,11 @@ def generate_image_summary(
 
 def generate_document_summary(
     text_content: str,
-    original_filename: str = "",
     document_date: str | None = None,
 ) -> str:
-    """Generiert einen kurzen, eindeutigen Titel für ein Dokument."""
+    """Generiert eine kurze, aber inhaltlich aussagekräftige Dokumentbeschreibung."""
     if not text_content or not text_content.strip():
-        return original_filename
+        return ""
     try:
         from app.services.ollama_service import get_background_ollama_service
 
@@ -74,22 +74,59 @@ def generate_document_summary(
             if document_date else ""
         )
         prompt = (
-            "Erstelle einen eindeutigen, sehr kurzen Titel für dieses Dokument auf Deutsch "
-            f"(maximal {_MAX_DOCUMENT_SUMMARY_LEN} Zeichen; wenige Stichwörter, kein ganzer Satz). "
-            "Nenne Dokumentart und wichtigstes Thema bzw. den Namen. Nenne ein Datum oder "
-            "einen Monat/Jahr, wenn es im Inhalt eindeutig erkennbar ist; erfinde kein Datum. "
-            "Gib ausschließlich den Titel aus, ohne Einleitung oder Anführungszeichen."
+            "Beschreibe den Inhalt dieses Dokuments auf Deutsch knapp, aber aussagekräftig "
+            f"(maximal {_MAX_SUMMARY_LEN} Zeichen, ein kurzer Satz oder Absatz). "
+            "Nenne Dokumentart, Thema und relevante Namen oder Details. Nenne ein Datum, "
+            "wenn es im Inhalt eindeutig erkennbar ist; erfinde kein Datum. "
+            "Beginne direkt mit der Beschreibung, ohne Einleitung:"
             f"{date_context}\n\nDokumentinhalt:\n{excerpt}"
         )
 
         summary = ollama.generate(prompt)
-        summary = _trim_summary(summary)
-        if summary and not _is_unhelpful_summary(summary):
-            return _trim_document_summary(summary)
-        return original_filename
+        if summary.strip() and not _is_unhelpful_summary(summary):
+            return _trim_summary(summary)
+        return ""
 
     except Exception as exc:
         logger.warning("Dokumentzusammenfassung fehlgeschlagen: %s", exc)
+        return ""
+
+
+def generate_document_short_summary(
+    text_content: str,
+    original_filename: str = "",
+    document_date: str | None = None,
+) -> str:
+    """Generiert ein prägnantes Label aus zwei bis fünf Wörtern für Liste und Timeline."""
+    if not text_content or not text_content.strip():
+        return original_filename
+    try:
+        from app.services.ollama_service import get_background_ollama_service
+
+        excerpt = text_content[:_INPUT_LIMIT].strip()
+        date_context = (
+            f"\nErkanntes Dokumentdatum: {document_date}"
+            if document_date else ""
+        )
+        prompt = (
+            "Erstelle eine eindeutige Kurzzusammenfassung dieses Dokuments auf Deutsch. "
+            "Gib nur 2 bis 5 Wörter aus, keinen ganzen Satz und keine Einleitung. "
+            "Nenne Dokumentart und wichtigstes Thema oder den Namen. "
+            "Füge ein Datum oder zumindest Jahr hinzu, wenn es im Inhalt sicher erkennbar ist; "
+            "erfinde niemals ein Datum. Setze das Datum ans Ende. "
+            "Beispiele: 'Stundenplan Lousa 2026', 'Reparatur Astra 10/2026'."
+            f"{date_context}\n\nDokumentinhalt:\n{excerpt}"
+        )
+        summary = get_background_ollama_service().generate(prompt)
+        summary = _trim_short_summary(summary)
+        if (
+            2 <= len(summary.split()) <= _MAX_SHORT_SUMMARY_WORDS
+            and not _is_unhelpful_summary(summary)
+        ):
+            return summary
+        return original_filename
+    except Exception as exc:
+        logger.warning("Dokument-Kurzzusammenfassung fehlgeschlagen: %s", exc)
         return original_filename
 
 
@@ -112,10 +149,18 @@ def _fallback_image_summary(vision_description: str, face_count: int | None) -> 
     return ""
 
 
-def _trim_document_summary(text: str) -> str:
-    if len(text) > _MAX_DOCUMENT_SUMMARY_LEN:
-        shortened = text[:_MAX_DOCUMENT_SUMMARY_LEN - 1].rsplit(" ", 1)[0]
-        text = (shortened or text[:_MAX_DOCUMENT_SUMMARY_LEN - 1]) + "…"
+def _trim_short_summary(text: str) -> str:
+    text = text.strip().strip("\"'„“")
+    words = text.split()
+    if len(words) > _MAX_SHORT_SUMMARY_WORDS:
+        date_at_end = re.fullmatch(
+            r"(?:\d{4}[-/.]\d{1,2}(?:[-/.]\d{1,2})?|\d{1,2}[-/.]\d{4}|\d{4})",
+            words[-1].rstrip(".,;:"),
+        )
+        if date_at_end:
+            text = " ".join(words[:_MAX_SHORT_SUMMARY_WORDS - 1] + [words[-1]])
+        else:
+            text = " ".join(words[:_MAX_SHORT_SUMMARY_WORDS])
     return text
 
 

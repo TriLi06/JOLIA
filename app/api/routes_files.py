@@ -32,6 +32,7 @@ class FileResponse(BaseModel):
     created_at: str | None = None
     created_at_user_edited: bool = False
     ai_summary: str | None = None
+    short_summary: str | None = None
     thumbnail_path: str | None = None
     sharpness_score: float | None = None
     best_file_id: str | None = None
@@ -53,6 +54,10 @@ class FileListResponse(BaseModel):
 
 class FileSummaryUpdate(BaseModel):
     summary: str = Field(max_length=400)
+
+
+class FileShortSummaryUpdate(BaseModel):
+    summary: str = Field(max_length=200)
 
 
 class FileDateUpdate(BaseModel):
@@ -233,6 +238,18 @@ def update_file_summary(
         raise HTTPException(status_code=404, detail="Datei nicht gefunden")
     repo.update_file_summary(db, file_id, payload.summary.strip(), user_edited=True)
     return {"message": "Zusammenfassung gespeichert.", "file_id": file_id}
+
+
+@router.patch("/{file_id}/short-summary")
+def update_file_short_summary(
+    file_id: str,
+    payload: FileShortSummaryUpdate,
+    db: Session = Depends(get_session),
+):
+    if not repo.get_file_by_id(db, file_id):
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    repo.update_file_short_summary(db, file_id, payload.summary.strip(), user_edited=True)
+    return {"message": "Kurzzusammenfassung gespeichert.", "file_id": file_id}
 
 
 @router.patch("/{file_id}/date")

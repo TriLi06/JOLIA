@@ -123,6 +123,7 @@ def _build_search_query(
         query = query.outerjoin(Chunk, Chunk.file_id == File.id).filter(
             func.lower(File.original_filename).like(func.lower(like))
             | func.lower(func.coalesce(File.ai_summary, "")).like(func.lower(like))
+            | func.lower(func.coalesce(File.short_summary, "")).like(func.lower(like))
             | func.lower(func.coalesce(File.user_description, "")).like(func.lower(like))
             | func.lower(func.coalesce(Chunk.text, "")).like(func.lower(like))
             | File.id.in_(person_file_ids)
@@ -400,6 +401,21 @@ def update_file_summary(
         f.ai_summary = summary[:400] if summary else None  # Sicherheitsgrenze
         if user_edited:
             f.summary_is_user_edited = True
+        db.commit()
+
+
+def update_file_short_summary(
+    db: Session,
+    file_id: str,
+    summary: str | None,
+    *,
+    user_edited: bool = False,
+) -> None:
+    f = db.get(File, file_id)
+    if f:
+        f.short_summary = summary[:200] if summary else None
+        if user_edited:
+            f.short_summary_is_user_edited = True
         db.commit()
 
 

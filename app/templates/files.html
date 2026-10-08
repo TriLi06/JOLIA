@@ -666,12 +666,12 @@ function onListScroll() {
 function rowHtml(f) {
     const sizeKb = ((f.file_size || 0) / 1024).toFixed(1);
     const documentDate = f.created_at || f.imported_at || '';
-    const displayName = f.ai_summary || f.original_filename;
+    const displayName = f.short_summary || f.original_filename;
     const tagsHtml = (f.tags || []).map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join(' ');
     return `
     <tr data-id="${f.id}">
         <td><a href="/files/${f.id}" onclick="return openDetail(event, '${f.id}')" title="${escapeHtml(f.original_filename)}">${escapeHtml(displayName)}</a>
-            ${f.ai_summary && f.ai_summary !== f.original_filename ? `<br><small>${escapeHtml(f.original_filename)}</small>` : ''}</td>
+            ${displayName !== f.original_filename ? `<br><small>${escapeHtml(f.original_filename)}</small>` : ''}</td>
         <td><small>${f.content_type || '–'}</small></td>
         <td>${tagsHtml}</td>
         <td><small>${sizeKb} KB</small></td>
@@ -775,7 +775,7 @@ function timelineTileHtml(f) {
          data-date="${escapeHtml((f.created_at || f.imported_at || '').slice(0, 10))}"
          data-size="${f.file_size || 0}"
          data-tags="${escapeHtml((f.tags || []).join(', '))}"
-         data-summary="${escapeHtml(f.ai_summary || '')}"
+         data-summary="${escapeHtml(f.short_summary || f.original_filename)}"
          onmouseenter="showTooltip(event, this)" onmouseleave="hideTooltip()"
          onclick="openDetail(event, '${f.id}')">
         ${inner}

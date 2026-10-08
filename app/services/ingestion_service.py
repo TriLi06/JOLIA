@@ -338,16 +338,31 @@ def process_file(file_id: str, db: Session) -> None:
 
         # KI-Zusammenfassung generieren und speichern
         ai_summary = None
+        short_summary = file_record.original_filename
         try:
             from app.services import summarization_service
             sidecar_data_for_summary = None
+            summary_date = file_record.created_at or result.created_at
             if file_record.content_type == "images":
                 from app.services import sidecar_service as sc
                 sidecar_data_for_summary = sc.read_json_sidecar(file_path)
+                exif = sidecar_data_for_summary.get("exif", {}) if sidecar_data_for_summary else {}
                 ai_summary = summarization_service.generate_image_summary(
                     vision_description=sidecar_data_for_summary.get("vision_description", "") if sidecar_data_for_summary else "",
-                    exif_meta=sidecar_data_for_summary.get("exif", {}) if sidecar_data_for_summary else {},
+                    exif_meta=exif,
                     face_count=sidecar_data_for_summary.get("face_count") if sidecar_data_for_summary else face_count or None,
+                )
+                summary_date = summary_date or (
+                    exif.get("DateTimeOriginal")
+                    or exif.get("DateTime")
+                    or exif.get("DateTimeDigitized")
+                )
+                short_summary_text = "\n".join(
+                    part for part in (
+                        ai_summary,
+                        sidecar_data_for_summary.get("vision_description", "") if sidecar_data_for_summary else "",
+                        sidecar_data_for_summary.get("ocr_text", "") if sidecar_data_for_summary else "",
+                    ) if part
                 )
             else:
                 # Für Dokumente: Text über das gesamte Dokument verteilt sampeln (nicht nur den ersten Chunk),
@@ -356,39 +371,53 @@ def process_file(file_id: str, db: Session) -> None:
                 from app.services import document_date_service
                 sampled_text = chunking_service.sample_chunk_texts([c.text for c in result.chunks]) if result.chunks else ""
                 summary_date = (
-                    file_record.created_at
+                    summary_date
                     or result.created_at
                     or document_date_service.extract_document_date(sampled_text)
                 )
                 ai_summary = summarization_service.generate_document_summary(
                     sampled_text,
-                    original_filename=file_record.original_filename,
                     document_date=summary_date[:10] if summary_date else None,
                 )
-            if ai_summary:
-                if not file_record.summary_is_user_edited:
-                    repo.update_file_summary(db, file_id, ai_summary)
-                # In Sidecar-JSON speichern
-                from app.services import sidecar_service as sc
-                sd = sc.read_json_sidecar(file_path)
-                if sd is not None and not file_record.summary_is_user_edited:
-                    sd["ai_summary"] = ai_summary
-                    sc.write_json_sidecar(file_path, sd)
-                # Sidecar-MD bei Bildern mit Summary aktualisieren
-                if file_record.content_type == "images" and result.sidecar_md_path:
-                    sd2 = sd if sd is not None else (sidecar_data_for_summary or {})
-                    updated_md = sc.build_image_md(
-                        original_filename=file_record.original_filename,
-                        ocr_text=sd2.get("ocr_text", ""),
-                        metadata=result.metadata or {},
-                        vision_description=sd2.get("vision_description", ""),
-                        face_count=sd2.get("face_count"),
-                        ai_summary=ai_summary,
-                    )
-                    sc.write_md_sidecar(file_path, updated_md)
-                logger.info("Dokumentzusammenfassung verarbeitet für %s", file_record.original_filename)
+                short_summary_text = sampled_text
+
+            short_summary = summarization_service.generate_document_short_summary(
+                short_summary_text,
+                original_filename=file_record.original_filename,
+                document_date=summary_date[:10] if summary_date else None,
+            ) or file_record.original_filename
         except Exception as sum_exc:
             logger.warning("KI-Zusammenfassung fehlgeschlagen für %s: %s", file_record.original_filename, sum_exc)
+
+        if ai_summary and not file_record.summary_is_user_edited:
+            repo.update_file_summary(db, file_id, ai_summary)
+        if not file_record.short_summary_is_user_edited:
+            repo.update_file_short_summary(db, file_id, short_summary, user_edited=False)
+
+        # Beide Texte separat im Sidecar hinterlegen; der Originaldateiname ist
+        # die Kurzzusammenfassung, falls kein brauchbarer KI-Titel ermittelt wurde.
+        from app.services import sidecar_service as sc
+        sd = sc.read_json_sidecar(file_path)
+        if sd is not None:
+            if ai_summary and not file_record.summary_is_user_edited:
+                sd["ai_summary"] = ai_summary
+            if not file_record.short_summary_is_user_edited:
+                sd["short_summary"] = short_summary
+            sc.write_json_sidecar(file_path, sd)
+
+        # Sidecar-MD bei Bildern mit Beschreibung aktualisieren.
+        if file_record.content_type == "images" and ai_summary and result.sidecar_md_path:
+            sd2 = sd if sd is not None else (sidecar_data_for_summary or {})
+            updated_md = sc.build_image_md(
+                original_filename=file_record.original_filename,
+                ocr_text=sd2.get("ocr_text", ""),
+                metadata=result.metadata or {},
+                vision_description=sd2.get("vision_description", ""),
+                face_count=sd2.get("face_count"),
+                ai_summary=ai_summary,
+            )
+            sc.write_md_sidecar(file_path, updated_md)
+        logger.info("KI-Beschreibungen verarbeitet für %s", file_record.original_filename)
 
         # Tags (z.B. Rechnung, Arzt, Homöopathie) per KI ermitteln und zuweisen
         assigned_tags: list[str] = []

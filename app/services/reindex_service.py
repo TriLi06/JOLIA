@@ -186,6 +186,11 @@ def _snapshot_manual_data(db: Session) -> dict:
         "manual_summaries": {
             f.sha256: f.ai_summary for f in files if f.summary_is_user_edited
         },
+        "manual_short_summaries": {
+            f.sha256: f.short_summary
+            for f in files
+            if f.short_summary_is_user_edited
+        },
         "tags": tags,
         "best_groups": best_groups,
         "face_labels": face_labels,
@@ -208,6 +213,11 @@ def _restore_manual_data(db: Session, snapshot: dict) -> dict:
         f = files_by_sha.get(sha)
         if f:
             repo.update_file_summary(db, f.id, summary, user_edited=True)
+
+    for sha, summary in snapshot.get("manual_short_summaries", {}).items():
+        f = files_by_sha.get(sha)
+        if f:
+            repo.update_file_short_summary(db, f.id, summary, user_edited=True)
 
     for sha, tag_names in snapshot["tags"].items():
         f = files_by_sha.get(sha)

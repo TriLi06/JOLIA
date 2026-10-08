@@ -7,9 +7,9 @@
     </div>
     {% endif %}
 
-    {% if file.ai_summary %}
+    {% if file.short_summary %}
     <div class="ai-summary-banner">
-        🤖 <strong>Zusammenfassung:</strong> {{ file.ai_summary }}
+        🤖 <strong>Kurzzusammenfassung:</strong> {{ file.short_summary }}
     </div>
     {% elif is_previewable_without_thumb %}
     <div class="ai-summary-banner file-preview-placeholder">
@@ -29,17 +29,25 @@
 
 <div class="grid">
     <div>
-        <h1>{{ file.ai_summary or file.original_filename }}</h1>
-        {% if file.ai_summary and file.ai_summary != file.original_filename %}
+        <h1>{{ file.short_summary or file.original_filename }}</h1>
         <p><small>Originaldatei: {{ file.original_filename }}</small></p>
-        {% endif %}
 
         <article id="summary-section">
-            <label for="file-summary-text"><strong>Zusammenfassung</strong></label>
-            <textarea id="file-summary-text" rows="2" maxlength="400" style="width:100%"
-                      placeholder="Kurze Beschreibung…">{{ file.ai_summary or file.original_filename }}</textarea>
+            <label for="file-short-summary-text"><strong>Kurzzusammenfassung (2–5 Wörter)</strong></label>
+            <textarea id="file-short-summary-text" rows="2" maxlength="200" style="width:100%"
+                      placeholder="Kurze Zusammenfassung…">{{ file.short_summary or file.original_filename }}</textarea>
             <div style="display:flex;gap:.5rem;margin-top:.5rem">
-                <button type="button" onclick="saveFileSummary()" title="Zusammenfassung speichern">💾 Speichern</button>
+                <button type="button" onclick="saveFileShortSummary()" title="Kurzzusammenfassung speichern">💾 Kurzfassung speichern</button>
+            </div>
+            <div id="file-short-summary-result" role="status"></div>
+        </article>
+
+        <article id="description-section">
+            <label for="file-summary-text"><strong>Ausführliche Beschreibung</strong></label>
+            <textarea id="file-summary-text" rows="5" maxlength="400" style="width:100%"
+                      placeholder="Ausführliche Beschreibung…">{{ file.ai_summary if file.ai_summary and file.ai_summary != file.original_filename else '' }}</textarea>
+            <div style="display:flex;gap:.5rem;margin-top:.5rem">
+                <button type="button" onclick="saveFileSummary()" title="Beschreibung speichern">💾 Beschreibung speichern</button>
             </div>
             <div id="file-summary-result" role="status"></div>
         </article>

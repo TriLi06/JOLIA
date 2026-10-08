@@ -18,6 +18,23 @@ async function saveFileSummary() {
     }
 }
 
+async function saveFileShortSummary() {
+    const textarea = document.getElementById('file-short-summary-text');
+    const result = document.getElementById('file-short-summary-result');
+    try {
+        const r = await fetch(`/api/files/${FILE_ID}/short-summary`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ summary: textarea.value })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler beim Speichern');
+        result.innerHTML = `<p class="success">✅ ${escapeHtml(data.message)}</p>`;
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ ${escapeHtml(e.message)}</p>`;
+    }
+}
+
 async function saveFileDate() {
     const input = document.getElementById('file-date-input');
     const result = document.getElementById('file-date-result');
