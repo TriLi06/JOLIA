@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 from app.processors.base_processor import BaseProcessor, ProcessingResult
@@ -32,10 +33,18 @@ class ImageProcessor(BaseProcessor):
             if vision_backend == "ollama":
                 vision_timeout = getattr(config.models, "vision_ollama_timeout", config.models.ollama_timeout)
                 context_lines = self._build_vision_context(exif_data)
-                vision_description, ocr_text, ocr_confidence = self._run_vision_ollama_structured(
-                    file_path, config.models.vision_ollama_model, config.models.ollama_base_url,
-                    vision_timeout, context_lines=context_lines,
-                )
+                vision_started_at = time.perf_counter()
+                try:
+                    vision_description, ocr_text, ocr_confidence = self._run_vision_ollama_structured(
+                        file_path, config.models.vision_ollama_model, config.models.ollama_base_url,
+                        vision_timeout, context_lines=context_lines,
+                    )
+                finally:
+                    logger.info(
+                        "Laufzeit | Datei=%s | Schritt=Bildanalyse (Vision-Modell) | Dauer=%.2f s",
+                        file_record.original_filename,
+                        time.perf_counter() - vision_started_at,
+                    )
                 # Fallback: Wenn das Vision-Modell nichts liefert (Timeout, Modell nicht
                 # geladen, CPU-Limit), klassische Tesseract-OCR nutzen, damit zumindest
                 # Text und ein Chunk entstehen.
@@ -44,9 +53,25 @@ class ImageProcessor(BaseProcessor):
                         "Vision-Backend lieferte keine Daten für %s – Fallback auf Tesseract-OCR.",
                         file_path.name,
                     )
-                    ocr_text, ocr_confidence = self._run_ocr(img, config.processing.ocr_languages)
+                    ocr_started_at = time.perf_counter()
+                    try:
+                        ocr_text, ocr_confidence = self._run_ocr(img, config.processing.ocr_languages)
+                    finally:
+                        logger.info(
+                            "Laufzeit | Datei=%s | Schritt=Tesseract-Fallback-OCR | Dauer=%.2f s",
+                            file_record.original_filename,
+                            time.perf_counter() - ocr_started_at,
+                        )
             else:
-                ocr_text, ocr_confidence = self._run_ocr(img, config.processing.ocr_languages)
+                ocr_started_at = time.perf_counter()
+                try:
+                    ocr_text, ocr_confidence = self._run_ocr(img, config.processing.ocr_languages)
+                finally:
+                    logger.info(
+                        "Laufzeit | Datei=%s | Schritt=Tesseract-OCR | Dauer=%.2f s",
+                        file_record.original_filename,
+                        time.perf_counter() - ocr_started_at,
+                    )
 
         # Ein Foto ohne erkannten Text ist kein OCR-Fehler und braucht daher keine Review.
         needs_review = bool(ocr_text.strip()) and ocr_confidence < config.processing.ocr_confidence_threshold
@@ -167,7 +192,15 @@ class ImageProcessor(BaseProcessor):
 
         # Phase B: CLIP-Embedding wenn aktiviert
         if getattr(config.processing, "enable_clip_embeddings", False):
-            self._store_clip_embedding(file_path, file_record, config, vision_description)
+            clip_started_at = time.perf_counter()
+            try:
+                self._store_clip_embedding(file_path, file_record, config, vision_description)
+            finally:
+                logger.info(
+                    "Laufzeit | Datei=%s | Schritt=Bild-Embedding | Dauer=%.2f s",
+                    file_record.original_filename,
+                    time.perf_counter() - clip_started_at,
+                )
 
         return ProcessingResult(
             success=True,

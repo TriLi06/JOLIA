@@ -109,6 +109,7 @@ Das WSL-Menü bietet:
 | `5` | Installationsstatus prüfen |
 | `6` | FRITZ!NAS oder lokalen Speicherordner konfigurieren |
 | `7` | LAN-Zugriff einschließlich Container-Health und Docker-Portweiterleitung testen |
+| `8` | JOLIA-Containerlogs der letzten 10 Minuten und neue Einträge live anzeigen |
 
 Menüpunkt `4` löscht die JOLIA-WSL-Distribution einschließlich der darin gespeicherten Archive, Datenbanken, Modelle, Container und Volumes. Erstelle und prüfe vorher ein Backup. Die Windows-Features WSL2 und Virtual Machine Platform bleiben aktiviert. Der geklonte Ordner `%USERPROFILE%\JOLIA` wird nicht automatisch entfernt.
 
@@ -155,6 +156,22 @@ Der WSL-Installer aktiviert Mirrored Networking. Die Anwendung lauscht im Contai
 **JOLIA ist ausschließlich für ein privates, vertrauenswürdiges und abgesichertes Heimnetz vorgesehen.** Nicht in Firmen-/Schulnetzen, öffentlichen oder Gäste-WLANs oder anderen gemeinsam genutzten Netzen betreiben. Keine Router-Portweiterleitung, öffentliche Freigabe, Reverse-Proxy-Veröffentlichung oder Tunnel zu JOLIA einrichten. Alle Personen und Geräte mit Zugriff auf dieses Heimnetz sind als vertrauenswürdig zu behandeln. Wenn diese Voraussetzung nicht erfüllt ist, JOLIA nicht starten.
 
 Die Übertragung läuft über HTTP und ist nicht für Internetzugriff abgesichert. Dokumente, Fotos und gegebenenfalls Gesichtserkennungsdaten werden lokal verarbeitet; jeder erreichbare LAN-Nutzer kann jedoch mit der Anwendung interagieren. Das Setup fragt kein Passwort ab und stellt keinen Login bereit.
+
+### Verarbeitungszeiten in der Konsole anzeigen
+
+JOLIA schreibt bei der Verarbeitung einer Datei die Laufzeit der einzelnen Schritte und die Gesamtzeit ins Anwendungs-Log. Öffne dazu PowerShell unter Windows und führe aus:
+
+```powershell
+wsl -d jolia-wsl -u root -- docker logs -f jolia-app
+```
+
+Die Ausgabe wird fortlaufend angezeigt; `Strg+C` beendet die Anzeige, nicht JOLIA. Zum Anzeigen der letzten 10 Minuten und anschließendem Weiterverfolgen:
+
+```powershell
+wsl -d jolia-wsl -u root -- docker logs --since 10m -f jolia-app
+```
+
+Die Zeilen mit `Laufzeit` zeigen unter anderem Bildanalyse, Datei-Extraktion, Embeddings, Zusammenfassung, Tag-Vorschlag und Kategorisierung.
 
 ## Funktionen und Formate
 

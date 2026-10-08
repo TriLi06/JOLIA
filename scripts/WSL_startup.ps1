@@ -16,6 +16,7 @@
 #
 # Rückstandsfreie Deinstallation: Menüoption 4
 # LAN-Zugriff klappt nicht? Schrittweise Diagnose: Menüoption 7
+# Verarbeitungszeiten in der Konsole: Menüoption 8
 
 $ErrorActionPreference = "Stop"
 
@@ -334,6 +335,21 @@ function Show-JoliaStatus {
         Write-Warn2 "Windows-Firewallregel konnte nicht geprueft werden: $($_.Exception.Message)"
     }
     Write-Host "Ausfuehrliche LAN-Diagnose: Menüoption 7" -ForegroundColor DarkGray
+}
+
+function Show-JoliaRecentLogs {
+    $distros = (wsl -l -q) -replace "`0", ""
+    if ($distros -notcontains $DistroName) {
+        Write-Fail "JOLIA ist nicht installiert. Verwende zuerst Option 1."
+        return
+    }
+
+    Write-Step "Zeige JOLIA-Containerlogs der letzten 10 Minuten und neue Eintraege..."
+    Write-Warn2 "Mit Strg+C wird die Loganzeige beendet."
+    wsl -d $DistroName -u root -- docker logs --since 10m -f jolia-app
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn2 "Die Loganzeige wurde mit Fehlercode $LASTEXITCODE beendet. Ist der Container 'jolia-app' gestartet?"
+    }
 }
 
 # Aktualisiert den JOLIA-Checkout robust, auch wenn lokal etwas veraendert wurde
@@ -1227,7 +1243,8 @@ Write-Host "  4: JOLIA vollständig deinstallieren"
 Write-Host "  5: Status prüfen"
 Write-Host "  6: FRITZ!Box-Zugang oder lokalen Speicherordner ändern"
 Write-Host "  7: LAN-Zugriff und Ollama diagnostizieren (Container, Modelle, API und Logs)"
-$choice = Read-Host "Bitte Auswahl eingeben (1-7)"
+Write-Host "  8: Verarbeitungszeiten und Logs der letzten 10 Minuten anzeigen"
+$choice = Read-Host "Bitte Auswahl eingeben (1-8)"
 
 switch ($choice) {
     "1" {
@@ -1281,6 +1298,11 @@ switch ($choice) {
     }
     "7" {
         Test-JoliaLanAccess
+        Read-Host "`nDruecke Enter zum Schliessen"
+        exit 0
+    }
+    "8" {
+        Show-JoliaRecentLogs
         Read-Host "`nDruecke Enter zum Schliessen"
         exit 0
     }

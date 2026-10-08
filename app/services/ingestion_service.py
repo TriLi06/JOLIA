@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -35,6 +36,15 @@ def _get_processing_semaphore() -> threading.Semaphore:
         _processing_semaphore = threading.Semaphore(size)
         _processing_semaphore_size = size
     return _processing_semaphore
+
+
+def _log_step_duration(file_name: str, step: str, started_at: float) -> None:
+    logger.info(
+        "Laufzeit | Datei=%s | Schritt=%s | Dauer=%.2f s",
+        file_name,
+        step,
+        time.perf_counter() - started_at,
+    )
 
 
 def _get_processor_registry() -> dict:
@@ -204,6 +214,7 @@ def process_file(file_id: str, db: Session) -> None:
         logger.error("Datei nicht gefunden: %s", file_id)
         return
 
+    processing_started_at = time.perf_counter()
     job = repo.create_job(db, file_id=file_id, job_type="process")
     repo.start_job(db, job.id)
     repo.update_file_status(db, file_id, "processing")
@@ -216,7 +227,11 @@ def process_file(file_id: str, db: Session) -> None:
         registry = _get_processor_registry()
         processor = registry.get(file_record.mime_type or "", registry["__default__"])
 
-        result = processor.process(file_path, file_record, cfg)
+        step_started_at = time.perf_counter()
+        try:
+            result = processor.process(file_path, file_record, cfg)
+        finally:
+            _log_step_duration(file_record.original_filename, "Datei-Extraktion", step_started_at)
 
         if not result.success:
             raise RuntimeError(result.error_message or "Processor-Fehler")
@@ -240,6 +255,7 @@ def process_file(file_id: str, db: Session) -> None:
             chunk_objs = repo.bulk_create_chunks(db, chunk_records)
 
             # Embeddings berechnen und in ChromaDB speichern (optional – schlägt fehl wenn kein Backend verfügbar)
+            step_started_at = time.perf_counter()
             try:
                 texts = [c.text for c in result.chunks]
                 embeddings = embedding_service.embed_texts(texts)
@@ -267,10 +283,13 @@ def process_file(file_id: str, db: Session) -> None:
                     file_record.original_filename,
                     emb_exc,
                 )
+            finally:
+                _log_step_duration(file_record.original_filename, "Embeddings und Vektorindex", step_started_at)
 
         # Gesichtserkennung für Bilder (wenn aktiviert)
         face_count = 0
         if file_record.content_type == "images" and cfg.processing.enable_face_detection:
+            step_started_at = time.perf_counter()
             try:
                 from app.services import face_service
                 face_count = face_service.detect_and_store_faces(file_path, file_id, db)
@@ -322,12 +341,15 @@ def process_file(file_id: str, db: Session) -> None:
                         logger.warning("Gesichts-Chunk Embedding fehlgeschlagen: %s", emb_exc)
             except Exception as face_exc:
                 logger.warning("Gesichtserkennung fehlgeschlagen für %s: %s", file_record.original_filename, face_exc)
+            finally:
+                _log_step_duration(file_record.original_filename, "Gesichtserkennung", step_started_at)
 
         now_iso = datetime.now().isoformat()
 
         # Thumbnail für Bilder und PDFs generieren (Vorschau in Timeline-/Listenansicht)
         is_pdf = file_path.suffix.lower() == ".pdf"
         if file_record.content_type == "images" or is_pdf:
+            step_started_at = time.perf_counter()
             try:
                 from app.services import thumbnail_service
                 rel_path = thumbnail_service.generate_and_store(file_path, file_id, cfg.paths.data_dir)
@@ -335,10 +357,13 @@ def process_file(file_id: str, db: Session) -> None:
                     repo.update_file_thumbnail(db, file_id, rel_path)
             except Exception as thumb_exc:
                 logger.warning("Thumbnail-Erstellung fehlgeschlagen für %s: %s", file_record.original_filename, thumb_exc)
+            finally:
+                _log_step_duration(file_record.original_filename, "Thumbnail", step_started_at)
 
         # KI-Zusammenfassung generieren und speichern
         ai_summary = None
         short_summary = file_record.original_filename
+        step_started_at = time.perf_counter()
         try:
             from app.services import summarization_service
             sidecar_data_for_summary = None
@@ -388,6 +413,8 @@ def process_file(file_id: str, db: Session) -> None:
             ) or file_record.original_filename
         except Exception as sum_exc:
             logger.warning("KI-Zusammenfassung fehlgeschlagen für %s: %s", file_record.original_filename, sum_exc)
+        finally:
+            _log_step_duration(file_record.original_filename, "Zusammenfassung und Kurztitel", step_started_at)
 
         if ai_summary and not file_record.summary_is_user_edited:
             repo.update_file_summary(db, file_id, ai_summary)
@@ -422,6 +449,7 @@ def process_file(file_id: str, db: Session) -> None:
         # Tags (z.B. Rechnung, Arzt, Homöopathie) per KI ermitteln und zuweisen
         assigned_tags: list[str] = []
         if cfg.processing.enable_tag_suggestion:
+            step_started_at = time.perf_counter()
             try:
                 from app.services import tag_service, chunking_service
                 context_text = ai_summary or (
@@ -437,9 +465,12 @@ def process_file(file_id: str, db: Session) -> None:
                     "Tag-Vorschlag fehlgeschlagen für %s: %s",
                     file_record.original_filename, tag_exc,
                 )
+            finally:
+                _log_step_duration(file_record.original_filename, "Tag-Vorschlag", step_started_at)
 
         # Kategorie (Brotkrumen-Pfad, z.B. Dokumente > Rechnungen > Auto) per KI ermitteln und zuweisen
         if cfg.processing.enable_auto_categorization:
+            step_started_at = time.perf_counter()
             try:
                 from app.services import category_service, chunking_service
                 context_text = ai_summary or (
@@ -466,6 +497,8 @@ def process_file(file_id: str, db: Session) -> None:
                     "Kategorie-Vorschlag fehlgeschlagen für %s: %s",
                     file_record.original_filename, cat_exc,
                 )
+            finally:
+                _log_step_duration(file_record.original_filename, "Kategorisierung", step_started_at)
 
         # Inhaltliches Erstellungsdatum fuer die Timeline bestimmen:
         # Bilder liefern es aus EXIF (result.created_at), fuer Dokumente wird ein
@@ -530,6 +563,8 @@ def process_file(file_id: str, db: Session) -> None:
         status = "queued" if isinstance(exc, RetryableProcessingError) else "failed"
         repo.update_file_status(db, file_id, status=status, error_message=str(exc))
         repo.finish_job(db, job.id, success=False, error_message=str(exc))
+    finally:
+        _log_step_duration(file_record.original_filename, "Gesamtverarbeitung", processing_started_at)
 
 
 def _reprocess_after_restart(file_id: str) -> None:

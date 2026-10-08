@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -26,7 +27,8 @@ def test_vision_connection_error_is_retryable(monkeypatch, tmp_path):
         )
 
 
-def test_retryable_processing_error_queues_file(monkeypatch, tmp_path):
+def test_retryable_processing_error_queues_file_and_logs_durations(monkeypatch, tmp_path, caplog):
+    caplog.set_level(logging.INFO, logger="app.services.ingestion_service")
     file_path = tmp_path / "image.jpg"
     file_path.touch()
     file_record = SimpleNamespace(
@@ -77,3 +79,5 @@ def test_retryable_processing_error_queues_file(monkeypatch, tmp_path):
     assert statuses == ["processing", "queued"]
     assert finished_jobs[0][0] is False
     assert finished_jobs[0][1]["error_message"] == "Vision-Modell nicht erreichbar"
+    assert "Schritt=Datei-Extraktion" in caplog.text
+    assert "Schritt=Gesamtverarbeitung" in caplog.text
