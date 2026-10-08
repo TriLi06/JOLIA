@@ -34,7 +34,8 @@ class File(Base):
     processed_at: Mapped[str | None] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="imported", index=True)
     error_message: Mapped[str | None] = mapped_column(Text)
-    ai_summary: Mapped[str | None] = mapped_column(Text)  # KI-generierte Kurzzusammenfassung (~300 Zeichen)
+    ai_summary: Mapped[str | None] = mapped_column(Text)  # KI-generierte oder manuell bearbeitete Kurzzusammenfassung
+    summary_is_user_edited: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     thumbnail_path: Mapped[str | None] = mapped_column(Text)  # Relativer Pfad zum generierten Thumbnail
     user_description: Mapped[str | None] = mapped_column(Text)  # Manuelle Beschreibung durch den Benutzer
     perceptual_hash: Mapped[str | None] = mapped_column(String(32), index=True)  # pHash fuer Duplikat-/Serienerkennung
@@ -311,4 +312,3 @@ class LocationEntry(Base):
     longitude: Mapped[str | None] = mapped_column(String(32))
 
     cluster: Mapped[LocationCluster] = relationship("LocationCluster", back_populates="entries")
-

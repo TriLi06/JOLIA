@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse as FastAPIFileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.config import get_config
@@ -47,6 +47,10 @@ class FileListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class FileSummaryUpdate(BaseModel):
+    summary: str = Field(max_length=400)
 
 
 @router.get("", response_model=FileListResponse)
@@ -210,6 +214,19 @@ def reprocess_file(
     repo.update_file_status(db, file_id, "queued")
     background_tasks.add_task(_process_in_background, file_id)
     return {"message": "Verarbeitung neu gestartet.", "file_id": file_id}
+
+
+@router.patch("/{file_id}/summary")
+def update_file_summary(
+    file_id: str,
+    payload: FileSummaryUpdate,
+    db: Session = Depends(get_session),
+):
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    repo.update_file_summary(db, file_id, payload.summary.strip(), user_edited=True)
+    return {"message": "Zusammenfassung gespeichert.", "file_id": file_id}
 
 
 @router.patch("/{file_id}/review-text")

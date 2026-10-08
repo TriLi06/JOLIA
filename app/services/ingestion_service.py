@@ -349,14 +349,25 @@ def process_file(file_id: str, db: Session) -> None:
                 # Für Dokumente: Text über das gesamte Dokument verteilt sampeln (nicht nur den ersten Chunk),
                 # damit auch lange Texte vollständig in die Zusammenfassung einfließen.
                 from app.services import chunking_service
+                from app.services import document_date_service
                 sampled_text = chunking_service.sample_chunk_texts([c.text for c in result.chunks]) if result.chunks else ""
-                ai_summary = summarization_service.generate_document_summary(sampled_text)
+                summary_date = (
+                    file_record.created_at
+                    or result.created_at
+                    or document_date_service.extract_document_date(sampled_text)
+                )
+                ai_summary = summarization_service.generate_document_summary(
+                    sampled_text,
+                    original_filename=file_record.original_filename,
+                    document_date=summary_date[:10] if summary_date else None,
+                )
             if ai_summary:
-                repo.update_file_summary(db, file_id, ai_summary)
+                if not file_record.summary_is_user_edited:
+                    repo.update_file_summary(db, file_id, ai_summary)
                 # In Sidecar-JSON speichern
                 from app.services import sidecar_service as sc
                 sd = sc.read_json_sidecar(file_path)
-                if sd is not None:
+                if sd is not None and not file_record.summary_is_user_edited:
                     sd["ai_summary"] = ai_summary
                     sc.write_json_sidecar(file_path, sd)
                 # Sidecar-MD bei Bildern mit Summary aktualisieren
@@ -371,7 +382,7 @@ def process_file(file_id: str, db: Session) -> None:
                         ai_summary=ai_summary,
                     )
                     sc.write_md_sidecar(file_path, updated_md)
-                logger.info("KI-Zusammenfassung gespeichert für %s", file_record.original_filename)
+                logger.info("Dokumentzusammenfassung verarbeitet für %s", file_record.original_filename)
         except Exception as sum_exc:
             logger.warning("KI-Zusammenfassung fehlgeschlagen für %s: %s", file_record.original_filename, sum_exc)
 

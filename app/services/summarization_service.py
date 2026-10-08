@@ -6,6 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 _MAX_SUMMARY_LEN = 300
+_MAX_DOCUMENT_SUMMARY_LEN = 100
 _INPUT_LIMIT = 6000  # Maximale Eingabe für den Prompt (Text kommt bereits über das ganze Dokument gesampelt)
 
 
@@ -54,28 +55,42 @@ def generate_image_summary(
         return _fallback_image_summary(vision_description, face_count)
 
 
-def generate_document_summary(text_content: str) -> str:
-    """Generiert eine kurze Zusammenfassung für ein Dokument auf Deutsch."""
+def generate_document_summary(
+    text_content: str,
+    original_filename: str = "",
+    document_date: str | None = None,
+) -> str:
+    """Generiert einen kurzen, eindeutigen Titel für ein Dokument."""
     if not text_content or not text_content.strip():
-        return ""
+        return original_filename
     try:
         from app.services.ollama_service import get_background_ollama_service
 
         ollama = get_background_ollama_service()
 
         excerpt = text_content[:_INPUT_LIMIT].strip()
+        date_context = (
+            f"\nErkanntes Dokumentdatum: {document_date}"
+            if document_date else ""
+        )
         prompt = (
-            f"Erstelle eine sehr kurze Zusammenfassung dieses Dokuments auf Deutsch "
-            f"(maximal {_MAX_SUMMARY_LEN} Zeichen, ein einziger Satz oder sehr kurzer Absatz). "
-            f"Beginne direkt mit der Beschreibung, ohne Einleitung:\n\n{excerpt}"
+            "Erstelle einen eindeutigen, sehr kurzen Titel für dieses Dokument auf Deutsch "
+            f"(maximal {_MAX_DOCUMENT_SUMMARY_LEN} Zeichen; wenige Stichwörter, kein ganzer Satz). "
+            "Nenne Dokumentart und wichtigstes Thema bzw. den Namen. Nenne ein Datum oder "
+            "einen Monat/Jahr, wenn es im Inhalt eindeutig erkennbar ist; erfinde kein Datum. "
+            "Gib ausschließlich den Titel aus, ohne Einleitung oder Anführungszeichen."
+            f"{date_context}\n\nDokumentinhalt:\n{excerpt}"
         )
 
         summary = ollama.generate(prompt)
-        return _trim_summary(summary)
+        summary = _trim_summary(summary)
+        if summary and not _is_unhelpful_summary(summary):
+            return _trim_document_summary(summary)
+        return original_filename
 
     except Exception as exc:
         logger.warning("Dokumentzusammenfassung fehlgeschlagen: %s", exc)
-        return _fallback_text_summary(text_content)
+        return original_filename
 
 
 def _trim_summary(text: str) -> str:
@@ -97,9 +112,19 @@ def _fallback_image_summary(vision_description: str, face_count: int | None) -> 
     return ""
 
 
-def _fallback_text_summary(text_content: str) -> str:
-    """Einfache Fallback-Zusammenfassung ohne LLM."""
-    excerpt = text_content.strip()[:_MAX_SUMMARY_LEN]
-    if len(text_content.strip()) > _MAX_SUMMARY_LEN:
-        excerpt = excerpt.rsplit(" ", 1)[0] + "…"
-    return excerpt
+def _trim_document_summary(text: str) -> str:
+    if len(text) > _MAX_DOCUMENT_SUMMARY_LEN:
+        shortened = text[:_MAX_DOCUMENT_SUMMARY_LEN - 1].rsplit(" ", 1)[0]
+        text = (shortened or text[:_MAX_DOCUMENT_SUMMARY_LEN - 1]) + "…"
+    return text
+
+
+def _is_unhelpful_summary(text: str) -> bool:
+    normalized = text.strip().lower().rstrip(".!?")
+    return normalized in {
+        "",
+        "dokument",
+        "zusammenfassung",
+        "keine zusammenfassung möglich",
+        "kein dokumentinhalt",
+    } or normalized.startswith(("ich kann ", "als ki-", "der text beschreibt "))

@@ -1,6 +1,23 @@
 <script>
 var FILE_ID = '{{ file.id }}';
 
+async function saveFileSummary() {
+    const textarea = document.getElementById('file-summary-text');
+    const result = document.getElementById('file-summary-result');
+    try {
+        const r = await fetch(`/api/files/${FILE_ID}/summary`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ summary: textarea.value })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler beim Speichern');
+        result.innerHTML = `<p class="success">✅ ${escapeHtml(data.message)}</p>`;
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ ${escapeHtml(e.message)}</p>`;
+    }
+}
+
 // Vorschaubereich (Bild/KI-Zusammenfassung) oeffnet fuer darstellbare Dateitypen die Vollbild-Ansicht.
 (function initFilePreviewTrigger() {
     const el = document.getElementById('file-preview-trigger');

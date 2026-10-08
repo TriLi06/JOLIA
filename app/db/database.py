@@ -67,6 +67,7 @@ def _migrate_schema(engine) -> None:
     _new_columns = {
         "files": [
             ("ai_summary", "TEXT"),
+            ("summary_is_user_edited", "BOOLEAN NOT NULL DEFAULT 0"),
             ("thumbnail_path", "TEXT"),
             ("user_description", "TEXT"),
             ("perceptual_hash", "VARCHAR(32)"),

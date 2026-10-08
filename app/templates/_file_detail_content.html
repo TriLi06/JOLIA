@@ -9,7 +9,7 @@
 
     {% if file.ai_summary %}
     <div class="ai-summary-banner">
-        🤖 <strong>KI-Zusammenfassung:</strong> {{ file.ai_summary }}
+        🤖 <strong>Zusammenfassung:</strong> {{ file.ai_summary }}
     </div>
     {% elif is_previewable_without_thumb %}
     <div class="ai-summary-banner file-preview-placeholder">
@@ -29,7 +29,20 @@
 
 <div class="grid">
     <div>
-        <h1>{{ file.original_filename }}</h1>
+        <h1>{{ file.ai_summary or file.original_filename }}</h1>
+        {% if file.ai_summary and file.ai_summary != file.original_filename %}
+        <p><small>Originaldatei: {{ file.original_filename }}</small></p>
+        {% endif %}
+
+        <article id="summary-section">
+            <label for="file-summary-text"><strong>Zusammenfassung</strong></label>
+            <textarea id="file-summary-text" rows="2" maxlength="400" style="width:100%"
+                      placeholder="Kurze Beschreibung…">{{ file.ai_summary or file.original_filename }}</textarea>
+            <div style="display:flex;gap:.5rem;margin-top:.5rem">
+                <button type="button" onclick="saveFileSummary()" title="Zusammenfassung speichern">💾 Speichern</button>
+            </div>
+            <div id="file-summary-result" role="status"></div>
+        </article>
 
         <table class="detail-table">
             <tr><th>Typ</th><td>{{ file.content_type or '–' }} ({{ file.mime_type or '–' }})</td></tr>

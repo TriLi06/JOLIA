@@ -388,10 +388,18 @@ def list_file_ids_by_status(db: Session, statuses: list[str]) -> list[str]:
     return [r[0] for r in rows]
 
 
-def update_file_summary(db: Session, file_id: str, summary: str) -> None:
+def update_file_summary(
+    db: Session,
+    file_id: str,
+    summary: str | None,
+    *,
+    user_edited: bool = False,
+) -> None:
     f = db.get(File, file_id)
     if f:
-        f.ai_summary = summary[:400]  # Sicherheitsgrenze
+        f.ai_summary = summary[:400] if summary else None  # Sicherheitsgrenze
+        if user_edited:
+            f.summary_is_user_edited = True
         db.commit()
 
 
