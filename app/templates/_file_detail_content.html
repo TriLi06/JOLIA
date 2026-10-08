@@ -44,6 +44,18 @@
             <div id="file-summary-result" role="status"></div>
         </article>
 
+        <article id="date-section">
+            <label for="file-date-input"><strong>Datum in der Timeline</strong></label>
+            <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+                <input id="file-date-input" type="date" required
+                       value="{{ (file.created_at or file.imported_at)[:10] if file.created_at or file.imported_at else '' }}"
+                       aria-label="Datum in der Timeline">
+                <button type="button" onclick="saveFileDate()" title="Datum speichern">💾 Speichern</button>
+            </div>
+            <small>Dieses Datum bestimmt die Sortierung in der Timeline.</small>
+            <div id="file-date-result" role="status"></div>
+        </article>
+
         <table class="detail-table">
             <tr><th>Typ</th><td>{{ file.content_type or '–' }} ({{ file.mime_type or '–' }})</td></tr>
             <tr><th>Status</th><td><span class="status-badge status-{{ file.status }}">{{ file.status }}</span></td></tr>

@@ -18,6 +18,27 @@ async function saveFileSummary() {
     }
 }
 
+async function saveFileDate() {
+    const input = document.getElementById('file-date-input');
+    const result = document.getElementById('file-date-result');
+    if (!input.value) {
+        result.innerHTML = '<p class="error">❌ Bitte ein Datum auswählen.</p>';
+        return;
+    }
+    try {
+        const r = await fetch(`/api/files/${FILE_ID}/date`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: input.value })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Fehler beim Speichern');
+        result.innerHTML = `<p class="success">✅ ${escapeHtml(data.message)}</p>`;
+    } catch (e) {
+        result.innerHTML = `<p class="error">❌ ${escapeHtml(e.message)}</p>`;
+    }
+}
+
 // Vorschaubereich (Bild/KI-Zusammenfassung) oeffnet fuer darstellbare Dateitypen die Vollbild-Ansicht.
 (function initFilePreviewTrigger() {
     const el = document.getElementById('file-preview-trigger');

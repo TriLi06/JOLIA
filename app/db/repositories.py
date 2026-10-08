@@ -403,11 +403,21 @@ def update_file_summary(
         db.commit()
 
 
-def update_file_created_at(db: Session, file_id: str, created_at: str) -> None:
+def update_file_created_at(
+    db: Session,
+    file_id: str,
+    created_at: str,
+    *,
+    user_edited: bool = False,
+) -> None:
     """Setzt das inhaltliche Erstellungs-/Belegdatum (Timeline-Sortierung)."""
     f = db.get(File, file_id)
     if f:
+        if f.created_at_user_edited and not user_edited:
+            return
         f.created_at = created_at
+        if user_edited:
+            f.created_at_user_edited = True
         db.commit()
 
 

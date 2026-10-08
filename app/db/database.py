@@ -79,6 +79,7 @@ def _migrate_schema(engine) -> None:
             ("category_needs_review", "BOOLEAN NOT NULL DEFAULT 0"),
             ("category_ai_response", "TEXT"),
             ("category_review_reason", "TEXT"),
+            ("created_at_user_edited", "BOOLEAN NOT NULL DEFAULT 0"),
         ]
     }
     with engine.connect() as conn:

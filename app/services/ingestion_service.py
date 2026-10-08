@@ -137,12 +137,15 @@ def import_file(file_path: Path, db: Session, archive_root: Path) -> dict:
     # z.B. ohne Dateisystem-mtime) zu bestimmen.
     original_filename = file_path.name
     recovered_created_at = None
+    recovered_created_at_user_edited = False
     from app.services import sidecar_service
     old_sidecar = sidecar_service.read_json_sidecar(file_path)
     if old_sidecar and old_sidecar.get("original_filename"):
         original_filename = old_sidecar["original_filename"]
     if old_sidecar and old_sidecar.get("created_at"):
         recovered_created_at = old_sidecar["created_at"]
+    if old_sidecar:
+        recovered_created_at_user_edited = old_sidecar.get("created_at_user_edited") is True
 
     # Ordnerstruktur (Jahr/Monat) am tatsächlichen Änderungsdatum der Datei
     # ausrichten statt am Importzeitpunkt - sonst wandern beim Reindizieren
@@ -176,6 +179,7 @@ def import_file(file_path: Path, db: Session, archive_root: Path) -> dict:
         file_size=file_size,
         imported_at=now.isoformat(),
         created_at=recovered_created_at,
+        created_at_user_edited=recovered_created_at_user_edited,
         status="imported",
     )
 
@@ -439,7 +443,11 @@ def process_file(file_id: str, db: Session) -> None:
         # beschriftetes Belegdatum (z.B. Rechnungsdatum) aus dem Text extrahiert.
         # Bereits beim Import aus einem alten Sidecar wiederhergestelltes Datum
         # hat Vorrang (stabil ueber Reindizierungen hinweg, siehe import_file()).
-        created_at = locals().get("category_created_at") or file_record.created_at or result.created_at
+        created_at = (
+            file_record.created_at
+            if file_record.created_at_user_edited
+            else locals().get("category_created_at") or file_record.created_at or result.created_at
+        )
         if not created_at and file_record.content_type == "documents":
             try:
                 from app.services import document_date_service
@@ -462,8 +470,12 @@ def process_file(file_id: str, db: Session) -> None:
             # wenn die Dateisystem-mtime dabei mal nicht erhalten bleiben sollte.
             from app.services import sidecar_service as sc
             sd_date = sc.read_json_sidecar(file_path)
-            if sd_date is not None and sd_date.get("created_at") != created_at:
+            if sd_date is not None and (
+                sd_date.get("created_at") != created_at
+                or sd_date.get("created_at_user_edited") != file_record.created_at_user_edited
+            ):
                 sd_date["created_at"] = created_at
+                sd_date["created_at_user_edited"] = file_record.created_at_user_edited
                 sc.write_json_sidecar(file_path, sd_date)
 
         repo.update_file_status(

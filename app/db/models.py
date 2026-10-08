@@ -30,6 +30,7 @@ class File(Base):
     content_type: Mapped[str | None] = mapped_column(String(32), index=True)  # Datei-Typ: documents/images/audio/video/other
     file_size: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[str | None] = mapped_column(String(32))
+    created_at_user_edited: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     imported_at: Mapped[str] = mapped_column(String(32), nullable=False, default=_now_iso)
     processed_at: Mapped[str | None] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="imported", index=True)

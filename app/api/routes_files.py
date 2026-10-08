@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -29,6 +30,7 @@ class FileResponse(BaseModel):
     processed_at: str | None
     error_message: str | None
     created_at: str | None = None
+    created_at_user_edited: bool = False
     ai_summary: str | None = None
     thumbnail_path: str | None = None
     sharpness_score: float | None = None
@@ -51,6 +53,10 @@ class FileListResponse(BaseModel):
 
 class FileSummaryUpdate(BaseModel):
     summary: str = Field(max_length=400)
+
+
+class FileDateUpdate(BaseModel):
+    date: date
 
 
 @router.get("", response_model=FileListResponse)
@@ -227,6 +233,19 @@ def update_file_summary(
         raise HTTPException(status_code=404, detail="Datei nicht gefunden")
     repo.update_file_summary(db, file_id, payload.summary.strip(), user_edited=True)
     return {"message": "Zusammenfassung gespeichert.", "file_id": file_id}
+
+
+@router.patch("/{file_id}/date")
+def update_file_date(
+    file_id: str,
+    payload: FileDateUpdate,
+    db: Session = Depends(get_session),
+):
+    f = repo.get_file_by_id(db, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    repo.update_file_created_at(db, file_id, payload.date.isoformat(), user_edited=True)
+    return {"message": "Datum gespeichert.", "file_id": file_id, "created_at": payload.date.isoformat()}
 
 
 @router.patch("/{file_id}/review-text")
