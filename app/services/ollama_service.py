@@ -6,6 +6,8 @@ from io import BytesIO
 
 import httpx
 
+from app.services.ai_inference_lock import inference_lock
+
 logger = logging.getLogger(__name__)
 
 _POST_ATTEMPTS = 3
@@ -95,7 +97,12 @@ class OllamaService:
             )
         )
 
-    def generate(self, prompt: str, system: str | None = None) -> str:
+    def generate(
+        self,
+        prompt: str,
+        system: str | None = None,
+        response_format: str | dict | None = None,
+    ) -> str:
         payload: dict = {
             "model": self.model,
             "prompt": prompt,
@@ -104,6 +111,8 @@ class OllamaService:
         }
         if system:
             payload["system"] = system
+        if response_format:
+            payload["format"] = response_format
 
         url = f"{self.base_url}/api/generate"
         logger.debug(
@@ -117,7 +126,8 @@ class OllamaService:
         )
 
         try:
-            r = self._post(url, payload)
+            with inference_lock:
+                r = self._post(url, payload)
             logger.debug(
                 "Ollama Antwort erhalten → HTTP %s | Antwort-Länge: %d Zeichen",
                 r.status_code,
@@ -142,30 +152,31 @@ class OllamaService:
 
     def embed(self, texts: list[str], model: str) -> list[list[float]]:
         """Erzeugt Embeddings via Ollama /api/embed (Batch)."""
-        try:
-            r = self._post(
-                f"{self.base_url}/api/embed",
-                {"model": model, "input": texts, "keep_alive": self.keep_alive},
-            )
-            self._raise_for_status(r)
-            return r.json()["embeddings"]
-        except httpx.HTTPStatusError as exc:
-            # Fallback: einzeln über /api/embeddings (ältere Ollama-Versionen)
-            unsupported_endpoint = exc.response.status_code == 405 or (
-                exc.response.status_code == 404
-                and "page not found" in exc.response.text.lower()
-            )
-            if not unsupported_endpoint:
-                raise
-            results = []
-            for text in texts:
+        with inference_lock:
+            try:
                 r = self._post(
-                    f"{self.base_url}/api/embeddings",
-                    {"model": model, "prompt": text, "keep_alive": self.keep_alive},
+                    f"{self.base_url}/api/embed",
+                    {"model": model, "input": texts, "keep_alive": self.keep_alive},
                 )
                 self._raise_for_status(r)
-                results.append(r.json()["embedding"])
-            return results
+                return r.json()["embeddings"]
+            except httpx.HTTPStatusError as exc:
+                # Fallback: einzeln über /api/embeddings (ältere Ollama-Versionen)
+                unsupported_endpoint = exc.response.status_code == 405 or (
+                    exc.response.status_code == 404
+                    and "page not found" in exc.response.text.lower()
+                )
+                if not unsupported_endpoint:
+                    raise
+                results = []
+                for text in texts:
+                    r = self._post(
+                        f"{self.base_url}/api/embeddings",
+                        {"model": model, "prompt": text, "keep_alive": self.keep_alive},
+                    )
+                    self._raise_for_status(r)
+                    results.append(r.json()["embedding"])
+                return results
 
     def describe_image(self, image_path: str, model: str, prompt: str | None = None) -> str:
         """Analysiert ein Bild mit einem Multimodal-Modell (z.B. llava, moondream).
@@ -213,21 +224,22 @@ class OllamaService:
             "keep_alive": self.keep_alive,
         }
         url = f"{self.base_url}/api/generate"
-        for index, context_size in enumerate(_VISION_CONTEXT_SIZES):
-            options["num_ctx"] = context_size
-            r = self._post(url, payload, timeout=self.timeout)
-            if self._is_context_overflow(r) and index < len(_VISION_CONTEXT_SIZES) - 1:
-                next_context_size = _VISION_CONTEXT_SIZES[index + 1]
-                logger.warning(
-                    "Ollama-Vision-Kontext zu klein (Modell %s, num_ctx=%d); "
-                    "wiederhole mit num_ctx=%d.",
-                    model,
-                    context_size,
-                    next_context_size,
-                )
-                continue
-            self._raise_for_status(r)
-            return r.json().get("response", "")
+        with inference_lock:
+            for index, context_size in enumerate(_VISION_CONTEXT_SIZES):
+                options["num_ctx"] = context_size
+                r = self._post(url, payload, timeout=self.timeout)
+                if self._is_context_overflow(r) and index < len(_VISION_CONTEXT_SIZES) - 1:
+                    next_context_size = _VISION_CONTEXT_SIZES[index + 1]
+                    logger.warning(
+                        "Ollama-Vision-Kontext zu klein (Modell %s, num_ctx=%d); "
+                        "wiederhole mit num_ctx=%d.",
+                        model,
+                        context_size,
+                        next_context_size,
+                    )
+                    continue
+                self._raise_for_status(r)
+                return r.json().get("response", "")
 
         raise RuntimeError("Ollama-Vision-Anfrage endete unerwartet ohne Antwort.")
 

@@ -850,6 +850,39 @@ nav .brand {
     border-bottom-left-radius: 6px;
     border-bottom-right-radius: 6px;
 }
+.chunk-text,
+.ai-output-text {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.ai-output-details {
+    margin: .75rem 0;
+}
+.ai-output-details > summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: .5rem .75rem;
+    border: 1px solid var(--pico-muted-border-color, #30363d);
+    border-radius: 6px;
+}
+.ai-output-details[open] > summary {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+.ai-output-list {
+    padding: .75rem;
+    border: 1px solid var(--pico-muted-border-color, #30363d);
+    border-top: none;
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+.ai-output-list section + section {
+    margin-top: 1rem;
+}
+.ai-output-text {
+    font-size: .9rem;
+}
 
 
 /* Buttons im Detailbereich sollen immer einzeilig bleiben statt umzubrechen */

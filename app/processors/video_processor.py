@@ -4,6 +4,7 @@ import logging
 import subprocess
 from pathlib import Path
 
+from app.services.ai_inference_lock import inference_lock
 from app.processors.base_processor import BaseProcessor, ProcessingResult
 from app.services import sidecar_service
 from app.services.chunking_service import split_text
@@ -209,15 +210,16 @@ class VideoProcessor(BaseProcessor):
                 ffmpeg_cmd += ["-t", str(sample_secs)]
             ffmpeg_cmd += ["-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", str(temp_wav)]
             subprocess.run(ffmpeg_cmd, check=True, capture_output=True, timeout=300)
-            result = subprocess.run(
-                [
-                    config.models.whisper_cpp_binary,
-                    "-m", config.models.whisper_model_path,
-                    "-f", str(temp_wav),
-                    "--language", "auto", "-otxt",
-                ],
-                capture_output=True, text=True, timeout=1800,
-            )
+            with inference_lock:
+                result = subprocess.run(
+                    [
+                        config.models.whisper_cpp_binary,
+                        "-m", config.models.whisper_model_path,
+                        "-f", str(temp_wav),
+                        "--language", "auto", "-otxt",
+                    ],
+                    capture_output=True, text=True, timeout=1800,
+                )
             return result.stdout.strip() or None
         except Exception as exc:
             logger.warning("Video-Transkription fehlgeschlagen für %s: %s", file_path.name, exc)
@@ -233,11 +235,12 @@ class VideoProcessor(BaseProcessor):
             sample_secs = getattr(config.processing, "transcription_sample_seconds", 90)
             model_name = getattr(config.models, "whisper_python_model", "base")
             logger.info("Lade openai-whisper Modell '%s' (Sample: %ds) ...", model_name, sample_secs)
-            model = whisper.load_model(model_name)
-            kwargs: dict = {"language": None, "verbose": False}
-            if sample_secs > 0:
-                kwargs["clip_timestamps"] = f"0,{sample_secs}"
-            result = model.transcribe(str(file_path), **kwargs)
+            with inference_lock:
+                model = whisper.load_model(model_name)
+                kwargs: dict = {"language": None, "verbose": False}
+                if sample_secs > 0:
+                    kwargs["clip_timestamps"] = f"0,{sample_secs}"
+                result = model.transcribe(str(file_path), **kwargs)
             segments = result.get("segments", [])
             if sample_secs > 0:
                 segments = [s for s in segments if s.get("start", 0) < sample_secs]

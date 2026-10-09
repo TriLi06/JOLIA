@@ -372,22 +372,17 @@ def process_file(file_id: str, db: Session) -> None:
                 from app.services import sidecar_service as sc
                 sidecar_data_for_summary = sc.read_json_sidecar(file_path)
                 exif = sidecar_data_for_summary.get("exif", {}) if sidecar_data_for_summary else {}
-                ai_summary = summarization_service.generate_image_summary(
+                ai_summary, short_summary = summarization_service.generate_image_summaries(
                     vision_description=sidecar_data_for_summary.get("vision_description", "") if sidecar_data_for_summary else "",
                     exif_meta=exif,
                     face_count=sidecar_data_for_summary.get("face_count") if sidecar_data_for_summary else face_count or None,
+                    ocr_text=sidecar_data_for_summary.get("ocr_text", "") if sidecar_data_for_summary else "",
+                    original_filename=file_record.original_filename,
                 )
                 summary_date = summary_date or (
                     exif.get("DateTimeOriginal")
                     or exif.get("DateTime")
                     or exif.get("DateTimeDigitized")
-                )
-                short_summary_text = "\n".join(
-                    part for part in (
-                        ai_summary,
-                        sidecar_data_for_summary.get("vision_description", "") if sidecar_data_for_summary else "",
-                        sidecar_data_for_summary.get("ocr_text", "") if sidecar_data_for_summary else "",
-                    ) if part
                 )
             else:
                 # Für Dokumente: Text über das gesamte Dokument verteilt sampeln (nicht nur den ersten Chunk),
@@ -400,17 +395,12 @@ def process_file(file_id: str, db: Session) -> None:
                     or result.created_at
                     or document_date_service.extract_document_date(sampled_text)
                 )
-                ai_summary = summarization_service.generate_document_summary(
+                ai_summary, short_summary = summarization_service.generate_document_summaries(
                     sampled_text,
+                    original_filename=file_record.original_filename,
                     document_date=summary_date[:10] if summary_date else None,
                 )
-                short_summary_text = sampled_text
-
-            short_summary = summarization_service.generate_document_short_summary(
-                short_summary_text,
-                original_filename=file_record.original_filename,
-                document_date=summary_date[:10] if summary_date else None,
-            ) or file_record.original_filename
+            short_summary = short_summary or file_record.original_filename
         except Exception as sum_exc:
             logger.warning("KI-Zusammenfassung fehlgeschlagen für %s: %s", file_record.original_filename, sum_exc)
         finally:

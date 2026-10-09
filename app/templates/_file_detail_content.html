@@ -91,19 +91,44 @@
     </div>
 </div>
 
-<!-- Chunks: Titel nur einmal, zu-/aufklappbar, Liste erscheint darunter -->
+{% set vision_description = sidecar_json.get('vision_description', '') if sidecar_json else '' %}
+{% set ocr_text = sidecar_json.get('ocr_text', '') if sidecar_json else '' %}
+{% if vision_description or ocr_text or file.category_ai_response %}
+<details class="ai-output-details">
+    <summary>🤖 Weitere KI-Ausgaben (ungekürzt)</summary>
+    <div class="ai-output-list">
+        {% if vision_description %}
+        <section>
+            <h4>Bildanalyse</h4>
+            <pre class="ai-output-text">{{ vision_description }}</pre>
+        </section>
+        {% endif %}
+        {% if ocr_text %}
+        <section>
+            <h4>Erkannter Text (OCR)</h4>
+            <pre class="ai-output-text">{{ ocr_text }}</pre>
+        </section>
+        {% endif %}
+        {% if file.category_ai_response %}
+        <section>
+            <h4>KI-Kategorieantwort</h4>
+            <pre class="ai-output-text">{{ file.category_ai_response }}</pre>
+        </section>
+        {% endif %}
+    </div>
+</details>
+{% endif %}
+
+<!-- Alle gespeicherten Chunks vollständig anzeigen -->
 <details class="chunks-details">
     <summary>📑 Chunks ({{ chunks|length }})</summary>
     <div class="chunks-list">
-        {% for chunk in chunks[:5] %}
+        {% for chunk in chunks %}
         <article>
             <header><small>Chunk {{ chunk.chunk_index }}{% if chunk.page %} · Seite {{ chunk.page }}{% endif %} · {{ chunk.chunk_type }}</small></header>
-            <p><small>{{ chunk.text[:300] }}{% if chunk.text|length > 300 %}…{% endif %}</small></p>
+            <div class="chunk-text">{{ chunk.text }}</div>
         </article>
         {% endfor %}
-        {% if chunks|length > 5 %}
-        <p><small>… und {{ chunks|length - 5 }} weitere Chunks</small></p>
-        {% endif %}
     </div>
 </details>
 

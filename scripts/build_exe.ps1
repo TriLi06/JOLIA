@@ -11,7 +11,7 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
 
 $sourcePath = Join-Path $PSScriptRoot "WSL_startup.ps1"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$outputDirectory = Join-Path $repoRoot "dist"
+$outputDirectory = Join-Path $repoRoot "dist"SW
 $outputPath = Join-Path $outputDirectory "JOLIA_setup.exe"
 $releaseSourcePath = Join-Path $outputDirectory "WSL_startup.ps1"
 $compilerPaths = @(

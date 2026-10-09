@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from app.services.ai_inference_lock import inference_lock
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -53,8 +54,9 @@ def detect_and_store_faces(file_path: Path, file_id: str, db: Session) -> int:
             )
         img_array = np.array(img_pil)
 
-        locations = fr.face_locations(img_array, model="hog")  # hog = CPU-freundlich
-        encodings = fr.face_encodings(img_array, locations)
+        with inference_lock:
+            locations = fr.face_locations(img_array, model="hog")  # hog = CPU-freundlich
+            encodings = fr.face_encodings(img_array, locations)
     except Exception as exc:
         logger.warning("Gesichtserkennung fehlgeschlagen für %s: %s", file_path.name, exc)
         return 0

@@ -344,11 +344,21 @@ function Show-JoliaRecentLogs {
         return
     }
 
-    Write-Step "Zeige JOLIA-Containerlogs der letzten 10 Minuten und neue Eintraege..."
-    Write-Warn2 "Mit Strg+C wird die Loganzeige beendet."
-    wsl -d $DistroName -u root -- docker logs --since 10m -f jolia-app
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn2 "Die Loganzeige wurde mit Fehlercode $LASTEXITCODE beendet. Ist der Container 'jolia-app' gestartet?"
+    $containerStatus = wsl -d $DistroName -u root -- docker inspect --format "{{.State.Status}}" jolia-app
+    $inspectExitCode = $LASTEXITCODE
+    if ($inspectExitCode -ne 0) {
+        Write-Fail "Der Docker-Container 'jolia-app' wurde nicht gefunden oder Docker ist nicht erreichbar."
+        return
+    }
+
+    Write-Step "Zeige JOLIA-Containerlogs der letzten 24 Stunden und neue Eintraege..."
+    Write-Ok "Containerstatus: $containerStatus"
+    Write-Warn2 "Falls keine alten Eintraege erscheinen, liegen moeglicherweise keine Containerlogs aus diesem Zeitraum vor."
+    Write-Warn2 "Mit Strg+C wird nur die Loganzeige beendet."
+    wsl -d $DistroName -u root -- docker logs --since 24h --timestamps --follow jolia-app
+    $logsExitCode = $LASTEXITCODE
+    if ($logsExitCode -ne 0) {
+        Write-Fail "Docker-Loganzeige fehlgeschlagen (Exitcode $logsExitCode)."
     }
 }
 
@@ -1243,7 +1253,7 @@ Write-Host "  4: JOLIA vollständig deinstallieren"
 Write-Host "  5: Status prüfen"
 Write-Host "  6: FRITZ!Box-Zugang oder lokalen Speicherordner ändern"
 Write-Host "  7: LAN-Zugriff und Ollama diagnostizieren (Container, Modelle, API und Logs)"
-Write-Host "  8: Verarbeitungszeiten und Logs der letzten 10 Minuten anzeigen"
+Write-Host "  8: Verarbeitungszeiten und Logs der letzten 24 Stunden anzeigen"
 $choice = Read-Host "Bitte Auswahl eingeben (1-8)"
 
 switch ($choice) {

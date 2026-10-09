@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from app.services.ai_inference_lock import inference_lock
 from app.services import model_lifecycle
 
 logger = logging.getLogger(__name__)
@@ -219,27 +220,28 @@ def _is_local_path(pretrained: str) -> bool:
 
 
 def _embed_image_openclip(image_path: Path, model_name: str, pretrained: str) -> list[float]:
-    _init_openclip_model(model_name, pretrained)
-    import torch
-    from PIL import Image
-    img = Image.open(str(image_path)).convert("RGB")
-    img_tensor = _clip_preprocess(img).unsqueeze(0)  # type: ignore[misc]
-    with torch.no_grad():
-        features = _clip_model.encode_image(img_tensor)  # type: ignore[misc]
-        features = features / features.norm(dim=-1, keepdim=True)
+    with inference_lock:
+        _init_openclip_model(model_name, pretrained)
+        import torch
+        from PIL import Image
+        img = Image.open(str(image_path)).convert("RGB")
+        img_tensor = _clip_preprocess(img).unsqueeze(0)  # type: ignore[misc]
+        with torch.no_grad():
+            features = _clip_model.encode_image(img_tensor)  # type: ignore[misc]
+            features = features / features.norm(dim=-1, keepdim=True)
     model_lifecycle.touch(_LIFECYCLE_NAME, _idle_unload_minutes())
     return features[0].tolist()
 
 
 def _embed_text_openclip(text: str, model_name: str, pretrained: str) -> list[float]:
-    _init_openclip_model(model_name, pretrained)
-    import open_clip
-    import torch
-    tokenizer = open_clip.get_tokenizer(_clip_model_name)
-    tokens = tokenizer([text])
-    with torch.no_grad():
-        features = _clip_model.encode_text(tokens)  # type: ignore[misc]
-        features = features / features.norm(dim=-1, keepdim=True)
+    with inference_lock:
+        _init_openclip_model(model_name, pretrained)
+        import open_clip
+        import torch
+        tokenizer = open_clip.get_tokenizer(_clip_model_name)
+        tokens = tokenizer([text])
+        with torch.no_grad():
+            features = _clip_model.encode_text(tokens)  # type: ignore[misc]
+            features = features / features.norm(dim=-1, keepdim=True)
     model_lifecycle.touch(_LIFECYCLE_NAME, _idle_unload_minutes())
     return features[0].tolist()
-

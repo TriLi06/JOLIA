@@ -59,7 +59,7 @@ class ModelsConfig(BaseModel):
     model_idle_unload_minutes: float = 10.0
     vision_backend: str = "tesseract"               # "tesseract" | "ollama"
     vision_ollama_model: str = "qwen2.5vl:3b"
-    vision_ollama_timeout: float = 900.0             # Sekunden pro Bild; auf reiner CPU großzügig wählen
+    vision_ollama_timeout: float = 1800.0            # Sekunden pro Bild; auf reiner CPU großzügig wählen
     whisper_cpp_binary: str = ""
     whisper_model_path: str = ""
     whisper_python_model: str = "base"            # openai-whisper Modellgröße: tiny | base | small | medium | large
@@ -236,6 +236,7 @@ _ENV_OVERRIDES: tuple[tuple[str, tuple[str, ...], Callable[[str], Any]], ...] = 
     ("OLLAMA_BASE_URL", ("models", "ollama_base_url"), _env_str),
     ("OLLAMA_MODEL", ("models", "ollama_model"), _env_str),
     ("JOLIA_OLLAMA_TIMEOUT", ("models", "ollama_timeout"), _env_float),
+    ("JOLIA_VISION_OLLAMA_TIMEOUT", ("models", "vision_ollama_timeout"), _env_float),
     ("JOLIA_OLLAMA_KEEP_ALIVE", ("models", "ollama_keep_alive"), _env_str),
     ("JOLIA_MODEL_IDLE_UNLOAD_MINUTES", ("models", "model_idle_unload_minutes"), _env_float),
     # tiny | base | small | medium | large – kleiner = schneller auf der CPU

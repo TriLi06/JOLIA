@@ -1,5 +1,8 @@
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import sys
+import threading
+import time
 from types import ModuleType
 
 import httpx
@@ -60,6 +63,63 @@ def test_generate_retries_temporary_server_errors(monkeypatch):
 
     assert service.generate("Antworte mit OK.") == "OK"
     assert len(calls) == 2
+
+
+def test_generate_sends_requested_response_format(monkeypatch):
+    captured = {}
+
+    def post(url, *, json, **_kwargs):
+        captured.update(json)
+        return httpx.Response(
+            200,
+            json={"response": '{"description":"Text","short_summary":"Titel"}'},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr("app.services.ollama_service.httpx.post", post)
+
+    response = OllamaService("http://ollama:11434", "qwen2.5:7b").generate(
+        "Erstelle Beschreibungen.",
+        response_format="json",
+    )
+
+    assert captured["format"] == "json"
+    assert response == '{"description":"Text","short_summary":"Titel"}'
+
+
+def test_inference_requests_are_serialized_across_instances_and_endpoints(monkeypatch):
+    active_requests = 0
+    maximum_active_requests = 0
+    state_lock = threading.Lock()
+
+    def post(url, **_kwargs):
+        nonlocal active_requests, maximum_active_requests
+        with state_lock:
+            active_requests += 1
+            maximum_active_requests = max(maximum_active_requests, active_requests)
+        try:
+            time.sleep(0.03)
+            payload = {"embeddings": [[0.1]]} if url.endswith("/api/embed") else {"response": "OK"}
+            return httpx.Response(
+                200,
+                json=payload,
+                request=httpx.Request("POST", url),
+            )
+        finally:
+            with state_lock:
+                active_requests -= 1
+
+    monkeypatch.setattr("app.services.ollama_service.httpx.post", post)
+    text_service = OllamaService("http://ollama:11434", "qwen2.5:1.5b")
+    embedding_service = OllamaService("http://ollama:11434", "bge-m3")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        generation = executor.submit(text_service.generate, "Prompt")
+        embedding = executor.submit(embedding_service.embed, ["Text"], "bge-m3")
+        assert generation.result() == "OK"
+        assert embedding.result() == [[0.1]]
+
+    assert maximum_active_requests == 1
 
 
 def test_embed_does_not_hide_model_errors_as_old_api_fallback(monkeypatch):

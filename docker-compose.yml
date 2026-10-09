@@ -19,6 +19,9 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: jolia-ollama
+    environment:
+      # Zusätzliche Ollama-seitige Begrenzung; JOLIA serialisiert alle Modellaufrufe selbst.
+      - OLLAMA_NUM_PARALLEL=1
     volumes:
       - ollama-models:/root/.ollama
     healthcheck:
@@ -74,6 +77,7 @@ services:
       - JOLIA_WHISPER_MODEL=${JOLIA_WHISPER_MODEL:-}
       - JOLIA_HF_ENDPOINT=${JOLIA_HF_ENDPOINT:-}
       - JOLIA_OLLAMA_TIMEOUT=${JOLIA_OLLAMA_TIMEOUT:-}
+      - JOLIA_VISION_OLLAMA_TIMEOUT=${JOLIA_VISION_OLLAMA_TIMEOUT:-}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-}
       - JOLIA_WATCHER_ENABLED=${JOLIA_WATCHER_ENABLED:-}
       - JOLIA_WATCHER_INTERVAL_SECONDS=${JOLIA_WATCHER_INTERVAL_SECONDS:-}

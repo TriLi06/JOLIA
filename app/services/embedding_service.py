@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from app.services.ai_inference_lock import inference_lock
 from app.services import model_lifecycle
 
 if TYPE_CHECKING:
@@ -71,10 +72,11 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 
     # sentence-transformers Backend
     global _model
-    if _model is None:
-        init_embedding_model(cfg.models.embedding_model, cfg.models.embedding_device)
-    assert _model is not None
-    vectors = _model.encode(texts, batch_size=32, show_progress_bar=False)
+    with inference_lock:
+        if _model is None:
+            init_embedding_model(cfg.models.embedding_model, cfg.models.embedding_device)
+        assert _model is not None
+        vectors = _model.encode(texts, batch_size=32, show_progress_bar=False)
     model_lifecycle.touch(_LIFECYCLE_NAME, _idle_unload_minutes())
     return [v.tolist() for v in vectors]
 

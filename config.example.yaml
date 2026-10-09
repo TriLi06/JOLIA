@@ -35,6 +35,8 @@ models:
   # Leerlaufzeit (Minuten) bis lokal im JOLIA-Prozess geladene Modelle
   # (SentenceTransformer/OpenCLIP/CLAP) wieder entladen werden.
   model_idle_unload_minutes: 10.0
+  # Maximale Wartezeit für Vision-Analysen pro Bild (Sekunden).
+  vision_ollama_timeout: 1800.0
   whisper_cpp_binary: ""
   whisper_model_path: ""
   ffmpeg_binary: "ffmpeg"

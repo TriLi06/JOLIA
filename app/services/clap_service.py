@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from app.services.ai_inference_lock import inference_lock
 from app.services import model_lifecycle
 
 logger = logging.getLogger(__name__)
@@ -104,15 +105,16 @@ def embed_audio(
     import librosa
 
     mn = model_name or _get_clap_model_name()
-    _init_clap_model(mn)
 
     duration = max_seconds if max_seconds and max_seconds > 0 else None
     audio_data, _ = librosa.load(str(audio_path), sr=CLAP_SAMPLE_RATE, mono=True, duration=duration)
 
-    inputs = _clap_processor(audios=audio_data, sampling_rate=CLAP_SAMPLE_RATE, return_tensors="pt")
-    with torch.no_grad():
-        features = _clap_model.get_audio_features(**inputs)  # type: ignore[union-attr]
-        features = features / features.norm(dim=-1, keepdim=True)
+    with inference_lock:
+        _init_clap_model(mn)
+        inputs = _clap_processor(audios=audio_data, sampling_rate=CLAP_SAMPLE_RATE, return_tensors="pt")
+        with torch.no_grad():
+            features = _clap_model.get_audio_features(**inputs)  # type: ignore[union-attr]
+            features = features / features.norm(dim=-1, keepdim=True)
     model_lifecycle.touch(_LIFECYCLE_NAME, _idle_unload_minutes())
     return features[0].tolist()
 
@@ -127,11 +129,12 @@ def embed_text_clap(
     import torch
 
     mn = model_name or _get_clap_model_name()
-    _init_clap_model(mn, local_files_only=local_files_only)
 
-    inputs = _clap_processor(text=[text], return_tensors="pt", padding=True)  # type: ignore[union-attr]
-    with torch.no_grad():
-        features = _clap_model.get_text_features(**inputs)  # type: ignore[union-attr]
-        features = features / features.norm(dim=-1, keepdim=True)
+    with inference_lock:
+        _init_clap_model(mn, local_files_only=local_files_only)
+        inputs = _clap_processor(text=[text], return_tensors="pt", padding=True)  # type: ignore[union-attr]
+        with torch.no_grad():
+            features = _clap_model.get_text_features(**inputs)  # type: ignore[union-attr]
+            features = features / features.norm(dim=-1, keepdim=True)
     model_lifecycle.touch(_LIFECYCLE_NAME, _idle_unload_minutes())
     return features[0].tolist()

@@ -147,3 +147,76 @@ def test_short_summary_falls_back_to_original_filename_when_ai_output_is_too_sho
         "Rechnung für Ersatzteile",
         original_filename="Scan_20261007_114900.pdf",
     ) == "Scan_20261007_114900.pdf"
+
+
+def test_document_summaries_use_one_json_model_call(monkeypatch):
+    calls = []
+
+    class Service:
+        def generate(self, prompt, *, response_format):
+            calls.append((prompt, response_format))
+            return (
+                '{"description":"Stundenplan für Lousa im Schuljahr 2026/2027",'
+                '"short_summary":"Stundenplan Lousa 2026"}'
+            )
+
+    monkeypatch.setattr(
+        "app.services.ollama_service.get_background_ollama_service",
+        lambda: Service(),
+    )
+
+    description, short_summary = summarization_service.generate_document_summaries(
+        "Stundenplan der Klasse.",
+        original_filename="scan.pdf",
+        document_date="2026-10-07",
+    )
+
+    assert description == "Stundenplan für Lousa im Schuljahr 2026/2027"
+    assert short_summary == "Stundenplan Lousa 2026"
+    assert len(calls) == 1
+    assert calls[0][1] == "json"
+    assert "Erkanntes Dokumentdatum: 2026-10-07" in calls[0][0]
+
+
+def test_image_summaries_include_ocr_and_fall_back_to_filename(monkeypatch):
+    calls = []
+
+    class Service:
+        def generate(self, prompt, *, response_format):
+            calls.append((prompt, response_format))
+            return '{"description":"Familienfoto im Garten","short_summary":"Familie im Garten"}'
+
+    monkeypatch.setattr(
+        "app.services.ollama_service.get_background_ollama_service",
+        lambda: Service(),
+    )
+
+    description, short_summary = summarization_service.generate_image_summaries(
+        "Das Bild zeigt eine Familie.",
+        {},
+        ocr_text="Sommerfest 2026",
+        original_filename="IMG_001.jpg",
+    )
+
+    assert description == "Familienfoto im Garten"
+    assert short_summary == "Familie im Garten"
+    assert len(calls) == 1
+    assert calls[0][1] == "json"
+    assert "Sommerfest 2026" in calls[0][0]
+
+
+def test_combined_document_summaries_use_filename_on_invalid_json(monkeypatch):
+    class Service:
+        def generate(self, _prompt, *, response_format):
+            assert response_format == "json"
+            return "not JSON"
+
+    monkeypatch.setattr(
+        "app.services.ollama_service.get_background_ollama_service",
+        lambda: Service(),
+    )
+
+    assert summarization_service.generate_document_summaries(
+        "Dokumenttext",
+        original_filename="Scan.pdf",
+    ) == ("", "Scan.pdf")

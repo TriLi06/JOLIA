@@ -1,6 +1,7 @@
 """Generiert kurze KI-Zusammenfassungen (~300 Zeichen) für Dateien via Ollama."""
 from __future__ import annotations
 
+import json
 import logging
 import re
 
@@ -9,6 +10,126 @@ logger = logging.getLogger(__name__)
 _MAX_SUMMARY_LEN = 300
 _MAX_SHORT_SUMMARY_WORDS = 5
 _INPUT_LIMIT = 6000  # Maximale Eingabe für den Prompt (Text kommt bereits über das ganze Dokument gesampelt)
+
+
+def generate_document_summaries(
+    text_content: str,
+    original_filename: str = "",
+    document_date: str | None = None,
+) -> tuple[str, str]:
+    """Generiert Lang- und Kurzbeschreibung eines Dokuments mit einem Modellaufruf."""
+    if not text_content or not text_content.strip():
+        return "", original_filename
+
+    excerpt = text_content[:_INPUT_LIMIT].strip()
+    date_context = (
+        f"\nErkanntes Dokumentdatum: {document_date}"
+        if document_date else ""
+    )
+    prompt = (
+        "Erstelle für das folgende Dokument beide Beschreibungen auf Deutsch. "
+        f"Die lange Beschreibung darf maximal {_MAX_SUMMARY_LEN} Zeichen umfassen. "
+        "Sie soll Dokumentart, Thema und relevante Namen oder Details nennen. "
+        "Die Kurzzusammenfassung muss aus 2 bis 5 Wörtern bestehen und Dokumentart "
+        "sowie wichtigstes Thema oder den Namen nennen. Füge ein Datum nur hinzu, "
+        "wenn es im Inhalt sicher erkennbar ist; erfinde niemals ein Datum. "
+        "Antworte ausschließlich als JSON-Objekt mit den String-Feldern "
+        '"description" und "short_summary".'
+        f"{date_context}\n\nDokumentinhalt:\n{excerpt}"
+    )
+    return _generate_summary_pair(
+        prompt,
+        fallback_summary="",
+        fallback_short=original_filename,
+        source="Dokument",
+    )
+
+
+def generate_image_summaries(
+    vision_description: str,
+    exif_meta: dict,
+    face_count: int | None = None,
+    ocr_text: str = "",
+    original_filename: str = "",
+) -> tuple[str, str]:
+    """Generiert Lang- und Kurzbeschreibung eines Bildes mit einem Modellaufruf."""
+    context_parts = []
+    if vision_description:
+        context_parts.append(f"Bildanalyse: {vision_description[:800]}")
+    if ocr_text:
+        context_parts.append(f"Sichtbarer Text: {ocr_text}")
+    if face_count:
+        context_parts.append(f"Erkannte Personen: {face_count}")
+    capture_date = (
+        exif_meta.get("DateTimeOriginal")
+        or exif_meta.get("DateTime")
+        or exif_meta.get("DateTimeDigitized")
+    )
+    if capture_date:
+        context_parts.append(f"Aufnahmedatum: {capture_date}")
+    gps = exif_meta.get("GPS")
+    if gps:
+        context_parts.append(f"GPS: {gps}")
+    if not context_parts:
+        return _fallback_image_summary(vision_description, face_count), original_filename
+
+    context = "\n".join(context_parts)[:_INPUT_LIMIT]
+    prompt = (
+        "Erstelle für dieses Bild beide Beschreibungen auf Deutsch. "
+        f"Die lange Beschreibung darf maximal {_MAX_SUMMARY_LEN} Zeichen umfassen "
+        "und soll den Bildinhalt knapp, aber aussagekräftig beschreiben. "
+        "Die Kurzzusammenfassung muss aus 2 bis 5 Wörtern bestehen und das wichtigste "
+        "Motiv oder Thema nennen. Verwende Datumsangaben nur, wenn sie in den "
+        "Informationen sicher erkennbar sind. Antworte ausschließlich als JSON-Objekt "
+        'mit den String-Feldern "description" und "short_summary".'
+        f"\n\nBildinformationen:\n{context}"
+    )
+    return _generate_summary_pair(
+        prompt,
+        fallback_summary=_fallback_image_summary(vision_description, face_count),
+        fallback_short=original_filename,
+        source="Bild",
+    )
+
+
+def _generate_summary_pair(
+    prompt: str,
+    *,
+    fallback_summary: str,
+    fallback_short: str,
+    source: str,
+) -> tuple[str, str]:
+    try:
+        from app.services.ollama_service import get_background_ollama_service
+
+        response = get_background_ollama_service().generate(
+            prompt,
+            response_format="json",
+        )
+        parsed = json.loads(response)
+        if not isinstance(parsed, dict):
+            raise ValueError("Antwort ist kein JSON-Objekt")
+    except Exception as exc:
+        logger.warning("%s-Beschreibungen fehlgeschlagen: %s", source, exc)
+        return fallback_summary, fallback_short
+
+    description = parsed.get("description", "")
+    short_summary = parsed.get("short_summary", "")
+    if not isinstance(description, str) or not isinstance(short_summary, str):
+        logger.warning("%s-Beschreibungen: JSON-Felder haben ungültige Typen.", source)
+        return fallback_summary, fallback_short
+
+    description = _trim_summary(description)
+    if _is_unhelpful_summary(description):
+        description = fallback_summary
+
+    short_summary = _trim_short_summary(short_summary)
+    if (
+        not 2 <= len(short_summary.split()) <= _MAX_SHORT_SUMMARY_WORDS
+        or _is_unhelpful_summary(short_summary)
+    ):
+        short_summary = fallback_short
+    return description, short_summary
 
 
 def generate_image_summary(

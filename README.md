@@ -109,7 +109,7 @@ Das WSL-Menü bietet:
 | `5` | Installationsstatus prüfen |
 | `6` | FRITZ!NAS oder lokalen Speicherordner konfigurieren |
 | `7` | LAN-Zugriff einschließlich Container-Health und Docker-Portweiterleitung testen |
-| `8` | JOLIA-Containerlogs der letzten 10 Minuten und neue Einträge live anzeigen |
+| `8` | JOLIA-Containerlogs der letzten 24 Stunden und neue Einträge live anzeigen |
 
 Menüpunkt `4` löscht die JOLIA-WSL-Distribution einschließlich der darin gespeicherten Archive, Datenbanken, Modelle, Container und Volumes. Erstelle und prüfe vorher ein Backup. Die Windows-Features WSL2 und Virtual Machine Platform bleiben aktiviert. Der geklonte Ordner `%USERPROFILE%\JOLIA` wird nicht automatisch entfernt.
 
@@ -162,14 +162,10 @@ Die Übertragung läuft über HTTP und ist nicht für Internetzugriff abgesicher
 JOLIA schreibt bei der Verarbeitung einer Datei die Laufzeit der einzelnen Schritte und die Gesamtzeit ins Anwendungs-Log. Öffne dazu PowerShell unter Windows und führe aus:
 
 ```powershell
-wsl -d jolia-wsl -u root -- docker logs -f jolia-app
+wsl -d jolia-wsl -u root -- docker logs --since 24h --timestamps --follow jolia-app
 ```
 
-Die Ausgabe wird fortlaufend angezeigt; `Strg+C` beendet die Anzeige, nicht JOLIA. Zum Anzeigen der letzten 10 Minuten und anschließendem Weiterverfolgen:
-
-```powershell
-wsl -d jolia-wsl -u root -- docker logs --since 10m -f jolia-app
-```
+Die Ausgabe enthält Logs der letzten 24 Stunden und wird fortlaufend aktualisiert. `Strg+C` beendet die Anzeige, nicht JOLIA. Falls keine alten Zeilen erscheinen, liegen möglicherweise keine Containerlogs aus diesem Zeitraum vor.
 
 Die Zeilen mit `Laufzeit` zeigen unter anderem Bildanalyse, Datei-Extraktion, Embeddings, Zusammenfassung, Tag-Vorschlag und Kategorisierung.
 

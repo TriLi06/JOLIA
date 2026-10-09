@@ -34,6 +34,7 @@ models:
   ollama_keep_alive: "10m"
   vision_backend: "ollama"
   vision_ollama_model: "qwen2.5vl:3b"
+  vision_ollama_timeout: 1800.0
   ffmpeg_binary: "ffmpeg"
   # Audio-/Video-Transkription via openai-whisper (CPU)
   whisper_python_model: "base"
