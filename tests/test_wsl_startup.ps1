@@ -17,7 +17,7 @@ foreach ($check in $localHealthChecks) {
 }
 Write-Output 'PASS: all Windows local health checks use explicit IPv4'
 
-foreach ($name in @('Set-JoliaEnvVar', 'Set-JoliaDeploymentConfig', 'Register-JoliaAutostart', 'Get-JoliaLanAddresses', 'Test-JoliaOllama')) {
+foreach ($name in @('Set-JoliaEnvVar', 'Set-JoliaDeploymentConfig', 'Ensure-JoliaTrixiePackageNames', 'Register-JoliaAutostart', 'Get-JoliaLanAddresses', 'Test-JoliaOllama')) {
     $definition = $ast.Find({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
@@ -41,6 +41,7 @@ function wsl {
     $global:LASTEXITCODE = $script:wslExitCode
     if ($script:wslExitCode -ne 0) { Write-Output 'test: permission denied' }
 }
+function Write-Fail {}
 
 Set-JoliaDeploymentConfig -Distro test
 $entries = @($script:commands | ForEach-Object {
@@ -55,6 +56,20 @@ for ($index = 0; $index -lt $expected.Count; $index++) {
     if ($entries[$index] -cne $expected[$index]) { throw "Invalid ENV entry: $index" }
 }
 Write-Output 'PASS: deployment writes four LF-terminated ENV entries'
+
+$packageFix = Ensure-JoliaTrixiePackageNames -Distro test -AppDir /opt/jolia
+$packageCommand = $script:commands[-1]
+if (-not $packageFix -or
+    $packageCommand -notlike "*sed -i 's/libsvtav1enc1/libsvtav1enc2/g'*" -or
+    $packageCommand -notlike "*grep -q 'libsvtav1enc1'*") {
+    throw 'Debian trixie package compatibility fix is missing'
+}
+$script:wslExitCode = 1
+if (Ensure-JoliaTrixiePackageNames -Distro test -AppDir /opt/jolia) {
+    throw 'Dockerfile compatibility failure was ignored'
+}
+$script:wslExitCode = 0
+Write-Output 'PASS: Debian trixie package name is normalized and failures are reported'
 
 $script:wslExitCode = 1
 $writeFailed = $false

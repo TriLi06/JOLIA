@@ -425,6 +425,19 @@ echo "JOLIA_GIT_RESULT:OK:$BRANCH"
     return $true
 }
 
+# Debian trixie ships libsvtav1enc2; older JOLIA checkouts still name
+# libsvtav1enc1. Normalize the Dockerfile after every sync before building.
+function Ensure-JoliaTrixiePackageNames ($Distro, $AppDir) {
+    $dockerfile = "$AppDir/Dockerfile"
+    $result = wsl -d $Distro -u root -- bash -c "set -e; test -f '$dockerfile' || { echo 'JOLIA Dockerfile fehlt.' >&2; exit 1; }; sed -i 's/libsvtav1enc1/libsvtav1enc2/g' '$dockerfile'; if grep -q 'libsvtav1enc1' '$dockerfile'; then echo 'Veralteter Paketname libsvtav1enc1 ist noch im Dockerfile vorhanden.' >&2; exit 1; fi"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Dockerfile konnte nicht auf das in Debian trixie verfügbare Paket libsvtav1enc2 angepasst werden."
+        if ($result) { $result | ForEach-Object { Write-Host $_ } }
+        return $false
+    }
+    return $true
+}
+
 function Update-Jolia {
     $distros = (wsl -l -q) -replace "`0", ""
     if ($distros -notcontains $DistroName) {
@@ -438,6 +451,9 @@ function Update-Jolia {
     Write-Warn2 "Vor Updates wird ein aktuelles JOLIA-Backup empfohlen (Einstellungen > Backups)."
     Write-Step "Lade JOLIA-Updates..."
     if (-not (Sync-JoliaRepo -Distro $DistroName -AppDir $AppDirLinux -Repo $RepoUrl)) {
+        return
+    }
+    if (-not (Ensure-JoliaTrixiePackageNames -Distro $DistroName -AppDir $AppDirLinux)) {
         return
     }
     if ($StorageMode -eq "FritzNas") {
@@ -1585,6 +1601,9 @@ Write-Step "Hole JOLIA-Code..."
 
 if (-not (Sync-JoliaRepo -Distro $DistroName -AppDir $AppDirLinux -Repo $RepoUrl)) {
     Write-Warn2 "Falls das Repo privat ist: Git-Credentials sicher in der Distro konfigurieren oder einen SSH-Deploy-Key nutzen. PATs niemals direkt in Git-URLs eintragen."
+    Exit-Fail
+}
+if (-not (Ensure-JoliaTrixiePackageNames -Distro $DistroName -AppDir $AppDirLinux)) {
     Exit-Fail
 }
 Write-Ok "JOLIA-Code aktuell."

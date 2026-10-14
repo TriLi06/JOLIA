@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         restic \
         libavif-bin \
-        libsvtav1enc1 \
+        libsvtav1enc2 \
         poppler-utils \
         libmediainfo0v5 \
         libsndfile1 \
