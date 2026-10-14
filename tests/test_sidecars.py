@@ -7,6 +7,7 @@ from app.services.sidecar_service import (
     write_md_sidecar,
     read_json_sidecar,
     read_md_sidecar,
+    build_image_md,
 )
 
 
@@ -47,3 +48,16 @@ def test_missing_sidecar_returns_none():
 
         assert read_json_sidecar(fake_file) is None
         assert read_md_sidecar(fake_file) is None
+
+
+def test_image_markdown_includes_capture_date_from_exif():
+    content = build_image_md(
+        "photo.jpg",
+        "",
+        {"DateTimeOriginal": "2020:05:04 12:30:00", "Make": "Example Camera"},
+        processed_at="2026-10-14T10:00:00",
+    )
+
+    assert "- **DateTimeOriginal:** 2020:05:04 12:30:00" in content
+    assert "- **Aufnahmedatum:** 2020:05:04 12:30:00" in content
+    assert "- **Make:** Example Camera" in content

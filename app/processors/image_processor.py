@@ -90,6 +90,15 @@ class ImageProcessor(BaseProcessor):
             metadata["Bildschärfe"] = f"{'scharf' if sharpness_score >= 100 else 'unscharf'} ({sharpness_score:.1f})"
         metadata.update(exif_data)
 
+        from app.services import document_date_service
+        capture_iso = (
+            document_date_service.parse_exif_datetime(exif_data.get("DateTimeOriginal"))
+            or document_date_service.parse_exif_datetime(exif_data.get("DateTimeDigitized"))
+            or document_date_service.parse_exif_datetime(exif_data.get("DateTime"))
+        )
+        if capture_iso:
+            metadata["Aufnahmedatum"] = capture_iso
+
         # --- Suchtext aus allen Quellen aufbauen ---
         search_parts = [f"Dateiname: {file_record.original_filename}"]
 
@@ -186,14 +195,6 @@ class ImageProcessor(BaseProcessor):
             vision_description=vision_description,
         )
         md_path = sidecar_service.write_md_sidecar(file_path, md_content)
-
-        # Aufnahmedatum aus EXIF als inhaltliches Erstellungsdatum (Timeline)
-        from app.services import document_date_service
-        capture_iso = (
-            document_date_service.parse_exif_datetime(exif_data.get("DateTimeOriginal"))
-            or document_date_service.parse_exif_datetime(exif_data.get("DateTimeDigitized"))
-            or document_date_service.parse_exif_datetime(exif_data.get("DateTime"))
-        )
 
         # Phase B: CLIP-Embedding wenn aktiviert
         if getattr(config.processing, "enable_clip_embeddings", False):
@@ -321,19 +322,40 @@ class ImageProcessor(BaseProcessor):
             "XResolution", "YResolution",
         }
         try:
-            from PIL.ExifTags import TAGS, GPSTAGS
+            from PIL.ExifTags import IFD, GPSTAGS, TAGS
 
-            raw = img._getexif()
-            if not raw:
-                return exif_data
+            getexif = getattr(img, "getexif", None)
+            raw = getexif() if callable(getexif) else img._getexif()
+            if raw is not None:
+                raw_data = dict(raw)
+                get_ifd = getattr(raw, "get_ifd", None)
+                gps_info = raw_data.get("GPSInfo")
+                if callable(get_ifd):
+                    try:
+                        raw_data.update(get_ifd(IFD.Exif))
+                    except (AttributeError, KeyError, TypeError):
+                        pass
+                    try:
+                        gps_info = get_ifd(IFD.GPSInfo)
+                    except (AttributeError, KeyError, TypeError):
+                        pass
 
-            for tag_id, value in raw.items():
-                tag = TAGS.get(tag_id, str(tag_id))
-                if tag == "GPSInfo":
-                    gps = {}
-                    for gps_tag_id, gps_val in value.items():
-                        gps_tag = GPSTAGS.get(gps_tag_id, str(gps_tag_id))
-                        gps[gps_tag] = str(gps_val)
+                for tag_id, value in raw_data.items():
+                    tag = TAGS.get(tag_id, str(tag_id))
+                    if tag == "GPSInfo" and isinstance(value, dict) and not gps_info:
+                        gps_info = value
+                    elif tag in _SCALAR_TAGS:
+                        exif_data[tag] = str(value)
+                    elif tag in _NUMERIC_TAGS:
+                        formatted = self._format_numeric_exif(tag, value)
+                        if formatted:
+                            exif_data[tag] = formatted
+
+                if isinstance(gps_info, dict):
+                    gps = {
+                        GPSTAGS.get(gps_tag_id, str(gps_tag_id)): str(gps_val)
+                        for gps_tag_id, gps_val in gps_info.items()
+                    }
                     lat = self._convert_gps(
                         gps.get("GPSLatitude"), gps.get("GPSLatitudeRef")
                     )
@@ -349,12 +371,6 @@ class ImageProcessor(BaseProcessor):
                         exif_data["GPS_Altitude"] = gps["GPSAltitude"]
                     if gps.get("GPSImgDirection"):
                         exif_data["GPS_Direction"] = gps["GPSImgDirection"]
-                elif tag in _SCALAR_TAGS:
-                    exif_data[tag] = str(value)
-                elif tag in _NUMERIC_TAGS:
-                    formatted = self._format_numeric_exif(tag, value)
-                    if formatted:
-                        exif_data[tag] = formatted
         except Exception as exc:
             logger.debug("EXIF-Extraktion fehlgeschlagen: %s", exc)
 

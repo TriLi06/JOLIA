@@ -79,7 +79,15 @@ def build_image_md(
     if processed_at is None:
         processed_at = datetime.now().isoformat()
 
-    meta_lines = "\n".join(f"- **{k}:** {v}" for k, v in metadata.items())
+    metadata_for_md = dict(metadata)
+    capture_date = (
+        metadata_for_md.get("DateTimeOriginal")
+        or metadata_for_md.get("DateTimeDigitized")
+        or metadata_for_md.get("DateTime")
+    )
+    if capture_date:
+        metadata_for_md.setdefault("Aufnahmedatum", capture_date)
+    meta_lines = "\n".join(f"- **{k}:** {v}" for k, v in metadata_for_md.items())
 
     summary_section = ""
     if ai_summary:

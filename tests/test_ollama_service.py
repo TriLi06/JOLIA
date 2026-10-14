@@ -84,6 +84,7 @@ def test_generate_sends_requested_response_format(monkeypatch):
     )
 
     assert captured["format"] == "json"
+    assert captured["options"] == {"repeat_penalty": 1.1, "repeat_last_n": 64}
     assert response == '{"description":"Text","short_summary":"Titel"}'
 
 
@@ -218,6 +219,8 @@ def test_describe_image_sends_normalized_jpeg(monkeypatch, tmp_path):
 
     assert result == "Bild"
     assert base64.b64decode(captured["images"][0]) == b"normalized-jpeg"
+    assert captured["options"]["repeat_penalty"] == 1.1
+    assert captured["options"]["repeat_last_n"] == 64
     assert captured["options"]["num_ctx"] == 8192
     assert captured["options"]["num_predict"] == 2048
 

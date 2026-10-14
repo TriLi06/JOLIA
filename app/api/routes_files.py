@@ -295,10 +295,17 @@ def update_review_text(
     archive_path = archive_service.resolve_archive_path(f.archive_path, cfg.paths.archive_root)
 
     # Korrigierten Text in MD-Sidecar speichern
+    sidecar_data = sidecar_service.read_json_sidecar(archive_path) or {}
+    metadata = {"SHA256": f.sha256, "Korrektur": "Manuell korrigiert"}
+    exif_data = sidecar_data.get("exif", {})
+    if isinstance(exif_data, dict):
+        metadata.update(exif_data)
+    if sidecar_data.get("created_at") or f.created_at:
+        metadata["Aufnahmedatum"] = sidecar_data.get("created_at") or f.created_at
     md_content = sidecar_service.build_image_md(
         f.original_filename,
         corrected_text,
-        {"SHA256": f.sha256, "Korrektur": "Manuell korrigiert"},
+        metadata,
     )
     md_path = sidecar_service.write_md_sidecar(archive_path, md_content)
     repo.update_file_status(db, file_id, "processed", sidecar_md_path=str(md_path))

@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 _POST_ATTEMPTS = 3
 _RETRY_DELAYS = (0.5, 1.0)
 _VISION_CONTEXT_SIZES = (8192, 12288, 16384)
+_REPEAT_OPTIONS: dict[str, float | int] = {"repeat_penalty": 1.1, "repeat_last_n": 64}
 
 
 class OllamaService:
@@ -108,6 +109,7 @@ class OllamaService:
             "prompt": prompt,
             "stream": False,
             "keep_alive": self.keep_alive,
+            "options": _REPEAT_OPTIONS.copy(),
         }
         if system:
             payload["system"] = system
@@ -210,6 +212,7 @@ class OllamaService:
             )
 
         options: dict[str, float | int] = {
+            **_REPEAT_OPTIONS,
             "temperature": 0.1,
             "top_p": 0.9,
             "num_predict": 2048,
