@@ -123,6 +123,8 @@ async def _scan_and_import(cfg: Config) -> None:
     finally:
         db.close()
 
+    ingestion_service.cleanup_empty_inbox_directories(cfg.paths.inbox)
+
     # Verarbeitung (OCR, Embedding …) asynchron in Thread-Pool starten
     for file_id in imported_ids:
         asyncio.create_task(asyncio.to_thread(_process_in_background, file_id))

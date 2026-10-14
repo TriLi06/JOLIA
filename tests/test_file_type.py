@@ -50,3 +50,7 @@ def test_dont_ignore_normal_files():
     assert is_ignored(Path("document.pdf")) is False
     assert is_ignored(Path("photo.jpg")) is False
     assert is_ignored(Path("song.mp3")) is False
+
+
+def test_ignore_google_supplemental_metadata():
+    assert is_ignored(Path("20250524_122538.jpg.supplemental-metadata.json")) is True

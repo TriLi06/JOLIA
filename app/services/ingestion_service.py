@@ -13,7 +13,11 @@ from sqlalchemy.orm import Session
 from app.db import repositories as repo
 from app.processors.base_processor import RetryableProcessingError
 from app.services.archive_service import calculate_archive_path, move_to_archive, resolve_archive_path
-from app.services.file_type_service import detect_file_type, is_ignored
+from app.services.file_type_service import (
+    detect_file_type,
+    is_google_supplemental_metadata,
+    is_ignored,
+)
 from app.services.hashing_service import compute_sha256
 from app.services.image_compression_service import SUPPORTED_IMAGE_SUFFIXES, compress_image
 from app.services.video_compression_service import (
@@ -109,6 +113,7 @@ def scan_inbox(inbox_path: Path) -> list[Path]:
 
     Fertige Scan-Bundles werden vorher zu einem PDF zusammengefasst; noch offene
     Scan-Seiten bleiben liegen, damit sie nicht als Einzelbilder importiert werden.
+    Google-Bildersicherungs-Metadaten werden entfernt, nicht importiert.
     """
     from app.config import get_config
     from app.services import scan_bundle_service
@@ -124,15 +129,57 @@ def scan_inbox(inbox_path: Path) -> list[Path]:
         except Exception:
             logger.exception("Inbox-Scan: Bündeln der Scan-Seiten fehlgeschlagen.")
 
-    files = [f for f in inbox_path.rglob("*") if f.is_file() and not is_ignored(f)]
+    inbox_files = [f for f in inbox_path.rglob("*") if f.is_file()]
+    for file_path in inbox_files:
+        if is_google_supplemental_metadata(file_path):
+            try:
+                file_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "Google-Bildmetadaten konnten nicht gelöscht werden: %s",
+                    file_path,
+                    exc_info=True,
+                )
+
+    files = [f for f in inbox_files if not is_ignored(f)]
     if cfg.scan.bundle_enabled:
         pending = [f for f in files if scan_bundle_service.is_scan_page(f)]
         if pending:
             logger.debug("Inbox-Scan: %d Scan-Seite(n) warten noch auf ihr Bundle.", len(pending))
             files = [f for f in files if f not in pending]
 
+    cleanup_empty_inbox_directories(inbox_path)
     logger.info("Inbox-Scan: %d Dateien gefunden in %s", len(files), inbox_path)
     return files
+
+
+def cleanup_empty_inbox_directories(inbox_path: Path) -> int:
+    """Entfernt leere Unterordner der Inbox, aber niemals den Inbox-Ordner selbst."""
+    if not inbox_path.exists():
+        return 0
+
+    directories = sorted(
+        (
+            path
+            for path in inbox_path.rglob("*")
+            if path.is_dir() and not path.is_symlink()
+        ),
+        key=lambda path: len(path.relative_to(inbox_path).parts),
+        reverse=True,
+    )
+    removed = 0
+    for directory in directories:
+        try:
+            if next(directory.iterdir(), None) is None:
+                directory.rmdir()
+                removed += 1
+        except OSError:
+            logger.warning(
+                "Leerer Inbox-Unterordner konnte nicht gelöscht werden: %s",
+                directory,
+                exc_info=True,
+            )
+    return removed
 
 
 def import_file(file_path: Path, db: Session, archive_root: Path) -> dict:

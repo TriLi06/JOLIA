@@ -17,8 +17,10 @@ def test_scan_inbox_finds_files_in_subdirectories(monkeypatch, tmp_path):
     nested.mkdir(parents=True)
     top_level_file = inbox / "top.txt"
     nested_file = nested / "photo.jpg"
+    metadata_file = nested / "20250524_122538.jpg.supplemental-metadata.json"
     top_level_file.write_bytes(b"text")
     nested_file.write_bytes(b"image")
+    metadata_file.write_text('{"title": "photo"}', encoding="utf-8")
     monkeypatch.setattr(
         "app.config.get_config",
         lambda: SimpleNamespace(scan=SimpleNamespace(bundle_enabled=False)),
@@ -27,6 +29,42 @@ def test_scan_inbox_finds_files_in_subdirectories(monkeypatch, tmp_path):
     files = ingestion_service.scan_inbox(inbox)
 
     assert set(files) == {top_level_file, nested_file}
+    assert not metadata_file.exists()
+
+
+def test_scan_inbox_deletes_metadata_and_prunes_empty_directories(monkeypatch, tmp_path):
+    inbox = tmp_path / "inbox"
+    empty_after_metadata = inbox / "album" / "metadata-only"
+    empty_after_metadata.mkdir(parents=True)
+    metadata_file = empty_after_metadata / "photo.jpg.supplemental-metadata.json"
+    metadata_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.config.get_config",
+        lambda: SimpleNamespace(scan=SimpleNamespace(bundle_enabled=False)),
+    )
+
+    assert ingestion_service.scan_inbox(inbox) == []
+
+    assert not metadata_file.exists()
+    assert not (inbox / "album").exists()
+    assert inbox.exists()
+
+
+def test_cleanup_empty_inbox_directories_removes_only_empty_subdirectories(tmp_path):
+    inbox = tmp_path / "inbox"
+    nested_empty = inbox / "album" / "empty"
+    nested_empty.mkdir(parents=True)
+    nonempty = inbox / "album" / "keep"
+    nonempty.mkdir()
+    (nonempty / "photo.jpg").write_bytes(b"image")
+
+    removed = ingestion_service.cleanup_empty_inbox_directories(inbox)
+
+    assert removed == 1
+    assert inbox.exists()
+    assert (inbox / "album").exists()
+    assert not nested_empty.exists()
+    assert (nonempty / "photo.jpg").exists()
 
 
 def test_image_import_compresses_but_keeps_original_sha_for_reindex(monkeypatch, tmp_path):

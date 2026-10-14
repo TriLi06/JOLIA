@@ -50,11 +50,18 @@ _IGNORE_PREFIXES = ("~$", ".")
 _IGNORE_SUFFIXES = (".tmp", ".part", ".crdownload", ".download")
 
 
+def is_google_supplemental_metadata(file_path: Path) -> bool:
+    """Erkennt JSON-Metadaten aus Google Fotos/Google Bilderbackup."""
+    return file_path.name.lower().endswith(".supplemental-metadata.json")
+
+
 def is_ignored(file_path: Path) -> bool:
     name = file_path.name
     if any(name.startswith(p) for p in _IGNORE_PREFIXES):
         return True
     if any(name.endswith(s) for s in _IGNORE_SUFFIXES):
+        return True
+    if is_google_supplemental_metadata(file_path):
         return True
     # Sidecar-Dateien nicht importieren
     if file_path.suffix.lower() == ".json" and file_path.stem.endswith(

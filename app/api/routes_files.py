@@ -202,12 +202,15 @@ def import_inbox(background_tasks: BackgroundTasks, db: Session = Depends(get_se
         return {"queued": 0, "message": "Keine neuen Dateien in der Inbox."}
 
     results = []
-    for file_path in files:
-        result = ingestion_service.import_file(file_path, db, cfg.paths.archive_root)
-        results.append(result)
-        if result["status"] == "imported":
-            file_id = result["file_id"]
-            background_tasks.add_task(_process_in_background, file_id)
+    try:
+        for file_path in files:
+            result = ingestion_service.import_file(file_path, db, cfg.paths.archive_root)
+            results.append(result)
+            if result["status"] == "imported":
+                file_id = result["file_id"]
+                background_tasks.add_task(_process_in_background, file_id)
+    finally:
+        ingestion_service.cleanup_empty_inbox_directories(cfg.paths.inbox)
 
     imported = sum(1 for r in results if r["status"] == "imported")
     duplicates = sum(1 for r in results if r["status"] == "duplicate")

@@ -235,7 +235,11 @@ logische CPU-Kerne, damit mehrere SVT-AV1-Instanzen die CPU/RAM-Ressourcen nicht
 überbelegen. Für ein anderes Profil kann `LIGHT`, `BALANCED` oder
 `EXTREME` angegeben werden.
 
-Der Inbox-Import durchsucht Unterordner rekursiv. Für JPEG, PNG, TIFF und WebP
+Der Inbox-Import durchsucht Unterordner rekursiv und importiert jede Datei
+einzeln. Leere Unterordner werden nach dem Import entfernt. Google-
+Bildersicherungsdateien mit der Endung `.supplemental-metadata.json` werden
+gelöscht und nicht importiert; das zugehörige Bild wird normal verarbeitet.
+Für JPEG, PNG, TIFF und WebP
 erstellt JOLIA eine RGB-AVIF-Datei mit leichter OpenCV-Entrauschung und einer
 maximalen Kantenlänge von 4096 Pixeln. EXIF- und ICC-Metadaten werden, soweit
 vorhanden, in die AVIF-Datei übernommen. Die Duplikaterkennung verwendet weiterhin
