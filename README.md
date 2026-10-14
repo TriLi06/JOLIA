@@ -171,18 +171,76 @@ Die Zeilen mit `Laufzeit` zeigen unter anderem Bildanalyse, Datei-Extraktion, Em
 
 ## Funktionen und Formate
 
-- Automatischer Inbox-Import und Archivierung der Originaldateien
+- Automatischer Inbox-Import und Archivierung; JPEG-, PNG-, TIFF- und WebP-Bilder werden als AVIF komprimiert, die Original-Checksumme bleibt für Duplikate erhalten
 - OCR, Metadaten- und Textextraktion sowie optional Audio-/Video-Transkription
 - Semantische Suche, RAG-Chat, Kategorien und Tags
 - Backups und Reindexierung aus den Originaldateien
 - Bündelung mehrseitiger Scans in durchsuchbare PDFs
 
+### Verschlüsselte Restic-Backups
+
+Backups werden als Restic-Repository unter
+`/data/backup/restic-repository` gespeichert. JOLIA setzt für Backup,
+Repository-Prüfung, Auflistung, Löschen und Restore automatisch das feste
+Restic-Passwort `JOLIABACKUP`; in `.env` ist keine Einstellung erforderlich.
+
+**Sicherheitshinweis:** Dieses fest eingebaute, allgemein bekannte Passwort bietet
+keinen wirksamen Schutz vor Personen, die Zugriff auf Repository oder Anwendung
+haben. Restic verschlüsselt die Daten zwar, aber das Passwort ist kein Geheimnis.
+Für vertrauliche Daten wäre ein eigenes, extern verwaltetes Passwort sicherer.
+
+Ist das Restic-Repository noch leer, wird automatisch ein vollständiger erster
+Snapshot erstellt. Weitere Läufe sind inkrementell und dedupliziert: Restic liest
+den vorherigen Snapshot als Basis und speichert nur neue oder geänderte Daten.
+Vor jedem inkrementellen Lauf werden die bisherigen Snapshot-Verweise und
+Repository-Strukturen geprüft; nach dem Backup werden sämtliche gespeicherten
+Datenblöcke gelesen und auf Integrität geprüft. Diese vollständige Prüfung kann
+bei großen NAS-Backups zusätzliche Zeit beanspruchen. Bei einem unvollständigen
+oder beschädigten Repository bricht JOLIA ab, statt darauf weiter aufzubauen.
+
+Vorhandene ZIP-Backups bleiben im Backup-Ordner erhalten und können weiterhin
+aufgelistet, gelöscht und wiederhergestellt werden. Die Restic-Snapshots liegen
+separat im Unterordner `restic-repository`.
+
 | Kategorie | Formate |
 | --- | --- |
 | Dokumente | PDF, TXT, MD, DOCX, XLSX, PPTX |
-| Bilder | JPG, PNG, HEIC, TIFF, WebP |
+| Bilder | JPG, PNG, HEIC, TIFF, WebP, AVIF |
 | Audio | MP3, M4A, WAV, FLAC, OGG |
-| Video | MP4, MKV, AVI, MOV, WebM |
+| Video | MP4, MOV, MKV, AVI, MTS, M2TS, WebM |
+
+MP4, MOV, MKV, AVI, MTS und M2TS werden beim Import geprüft und mit dem
+ARCHIVE-Profil zu AV1/AAC in einem MP4-Container kodiert. 4K-Quellen werden
+auf 1440p skaliert. Der SHA-256 der importierten Originaldatei bleibt für die
+Duplikaterkennung erhalten; ein Sidecar macht Reindexierung ohne erneute
+verlustbehaftete Kodierung möglich. Fehlt beim Reindex eines MP4 das Sidecar,
+erkennt JOLIA bereits komprimierte AV1/AAC-Dateien anhand ihrer Streams. Auch
+Bilder werden als AVIF abgelegt und beim Reindex nicht nochmals komprimiert.
+Schlägt Komprimierung oder Ausgabeprüfung fehl, bleibt die unkomprimierte
+Quelldatei erhalten. Ein rekursiver Batch-Helfer nutzt mehrere Prozesse, meldet
+Fortschritt und ersetzt Dateien erst nach einer erfolgreichen Stream- und
+Dekodierprüfung. Weitere Profile (LIGHT, BALANCED, EXTREME) sind im
+Video-Komprimierungsdienst verfügbar.
+
+Ein vorhandener Ordner kann separat batchweise komprimiert werden (Python 3.12+
+und FFmpeg mit `libsvtav1`/`ffprobe` erforderlich):
+
+```powershell
+python .\scripts\compress_videos.py "D:\Videos" --profile ARCHIVE
+```
+
+Das Skript sucht Unterordner rekursiv, überspringt bereits als AV1/AAC erkannte
+Videos und begrenzt die Standard-Parallelität auf etwa einen Worker je zwölf
+logische CPU-Kerne, damit mehrere SVT-AV1-Instanzen die CPU/RAM-Ressourcen nicht
+überbelegen. Für ein anderes Profil kann `LIGHT`, `BALANCED` oder
+`EXTREME` angegeben werden.
+
+Der Inbox-Import durchsucht Unterordner rekursiv. Für JPEG, PNG, TIFF und WebP
+erstellt JOLIA eine RGB-AVIF-Datei mit leichter OpenCV-Entrauschung und einer
+maximalen Kantenlänge von 4096 Pixeln. EXIF- und ICC-Metadaten werden, soweit
+vorhanden, in die AVIF-Datei übernommen. Die Duplikaterkennung verwendet weiterhin
+den SHA-256 der importierten Originaldatei; derselbe Hash und der Hash der
+archivierten AVIF-Datei werden für einen späteren Reindex im Sidecar gesichert.
 
 ## Mehrseitige Scans
 

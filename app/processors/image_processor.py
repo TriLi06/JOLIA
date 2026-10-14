@@ -7,6 +7,7 @@ from pathlib import Path
 from app.processors.base_processor import BaseProcessor, ProcessingResult
 from app.services import sidecar_service
 from app.services.chunking_service import TextChunk, split_text
+from app.services.hashing_service import compute_sha256
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,7 @@ class ImageProcessor(BaseProcessor):
             "file_id": file_record.id,
             "original_filename": file_record.original_filename,
             "sha256": file_record.sha256,
+            "archive_sha256": compute_sha256(file_path),
             "mime_type": file_record.mime_type,
             "content_type": "images",
             "file_size": file_record.file_size,
@@ -175,6 +177,9 @@ class ImageProcessor(BaseProcessor):
             "ocr_confidence": ocr_confidence,
             "needs_review": needs_review,
         }
+        previous_sidecar = sidecar_service.read_json_sidecar(file_path)
+        if previous_sidecar and previous_sidecar.get("original_mime_type"):
+            json_data["original_mime_type"] = previous_sidecar["original_mime_type"]
         json_path = sidecar_service.write_json_sidecar(file_path, json_data)
         md_content = sidecar_service.build_image_md(
             file_record.original_filename, ocr_text, metadata,
@@ -253,7 +258,7 @@ class ImageProcessor(BaseProcessor):
         from PIL import Image
 
         # HEIC-Support via pillow-heif
-        if file_path.suffix.lower() in (".heic", ".heif"):
+        if file_path.suffix.lower() in (".heic", ".heif", ".avif"):
             try:
                 from pillow_heif import register_heif_opener
                 register_heif_opener()

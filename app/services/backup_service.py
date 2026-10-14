@@ -1,25 +1,11 @@
 """
 Backup & Wiederherstellung.
 
-Jedes Backup ist genau EINE ZIP-Datei mit Zeitstempel im Namen
-(``jolia_JJMMTTHHMM_backup.zip``), die im Backup-Ziel (z.B. NAS-Freigabe) liegt.
-Frühere Backups werden dadurch nicht mehr überschrieben, sondern bleiben als
-eigenständige, in sich konsistente Stände erhalten.
-
-Aufbau des Archivs:
-
-    source_documents/...   -> Inhalt von paths.archive_root
-    data/...               -> Inhalt von paths.data_dir (ohne temp_dir)
-    manifest.json          -> Metadaten des Backups
-
-Vor dem Schreiben wird geprüft, wie viel Platz im Backup-Ziel frei ist; reicht er
-nicht, werden die ältesten Backups gelöscht (die neuesten ``keep_min_backups``
-bleiben geschützt).
-
-``restore_backup()`` setzt Archiv und Datenverzeichnis exakt auf den Stand eines
-gewählten Backups zurück – alles, was nicht im Archiv enthalten ist, geht dabei
-verloren. Danach muss der Prozess neu starten, da SQLite/ChromaDB offene Handles
-auf die ersetzten Dateien halten.
+Neue Sicherungen werden als verschlüsseltes Restic-Repository mit vollständigen
+und danach inkrementellen Snapshots angelegt. Die Repository-Struktur wird vor
+jedem inkrementellen Lauf geprüft; nach jedem Backup werden die Datenblöcke
+vollständig gelesen und validiert. Alte ZIP-Backups bleiben weiterhin
+wiederherstellbar.
 """
 from __future__ import annotations
 
@@ -28,6 +14,9 @@ import logging
 import os
 import re
 import shutil
+import subprocess
+import tempfile
+import threading
 import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -44,6 +33,10 @@ BACKUP_GLOB = "jolia_*_backup.zip"
 _NAME_RE = re.compile(r"^jolia_(?P<ts>\d{10})(?:-(?P<seq>\d+))?_backup\.zip$")
 _TS_FORMAT = "%y%m%d%H%M"
 PART_SUFFIX = ".part"
+RESTIC_REPOSITORY_NAME = "restic-repository"
+RESTIC_PASSWORD = "JOLIABACKUP"
+_SNAPSHOT_ID_RE = re.compile(r"^[0-9a-f]{8,64}$")
+_RESTIC_LOCK = threading.Lock()
 
 # Kleiner Puffer zusätzlich zur geschätzten Backup-Größe (Dateisystem-Overhead).
 _SPACE_HEADROOM_BYTES = 64 * 1024 * 1024
@@ -62,6 +55,7 @@ class BackupEntry:
             "path": str(self.path),
             "size_bytes": self.size_bytes,
             "created_at": self.created_at.isoformat(timespec="seconds"),
+            "type": "zip",
         }
 
 
@@ -70,6 +64,33 @@ class BackupResult:
     zip_path: Path
     files_copied: int
     bytes_written: int
+    log_lines: list[str] = field(default_factory=list)
+
+    @property
+    def log(self) -> str:
+        return "\n".join(self.log_lines)
+
+
+@dataclass(frozen=True)
+class ResticBackupEntry:
+    name: str
+    created_at: datetime
+
+    def as_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "path": None,
+            "size_bytes": None,
+            "created_at": self.created_at.isoformat(timespec="seconds"),
+            "type": "restic",
+        }
+
+
+@dataclass
+class ResticBackupResult:
+    snapshot_id: str
+    files_copied: int
+    bytes_copied: int
     log_lines: list[str] = field(default_factory=list)
 
     @property
@@ -118,6 +139,239 @@ def get_free_bytes(path: Path) -> int | None:
         return shutil.disk_usage(str(path)).free
     except OSError:
         return None
+
+
+def list_all_backups(backup_target: Path) -> list[dict]:
+    """Listet Restic-Snapshots und noch vorhandene ZIP-Backups gemeinsam auf."""
+    entries = [entry.as_dict() for entry in list_backups(backup_target)]
+    entries.extend(entry.as_dict() for entry in list_restic_backups(backup_target))
+    entries.sort(key=lambda entry: (entry["created_at"], entry["name"]), reverse=True)
+    return entries
+
+
+def list_restic_backups(backup_target: Path) -> list[ResticBackupEntry]:
+    repository = _restic_repository_path(backup_target)
+    if not (repository / "config").is_file():
+        if repository.exists() and any(repository.iterdir()):
+            raise RuntimeError(
+                f"Restic-Repository {repository} enthält Dateien, aber keine gültige "
+                "Repository-Konfiguration."
+            )
+        return []
+
+    snapshots = _restic_snapshots(repository)
+    entries = [
+        ResticBackupEntry(snapshot["id"], _parse_snapshot_time(snapshot["time"]))
+        for snapshot in snapshots
+        if snapshot.get("id") and snapshot.get("time")
+    ]
+    entries.sort(key=lambda entry: (entry.created_at, entry.name), reverse=True)
+    return entries
+
+
+def is_restic_snapshot_id(name: str) -> bool:
+    return bool(_SNAPSHOT_ID_RE.fullmatch(name))
+
+
+def resolve_restic_snapshot(backup_target: Path, name: str) -> str:
+    if not is_restic_snapshot_id(name):
+        raise ValueError(f"Ungültige Restic-Snapshot-ID: {name}")
+    repository = _restic_repository_path(backup_target)
+    snapshots = _restic_snapshots(repository)
+    if not any(snapshot.get("id") == name for snapshot in snapshots):
+        raise FileNotFoundError(f"Restic-Snapshot nicht gefunden: {name}")
+    return name
+
+
+def delete_restic_snapshot(backup_target: Path, name: str) -> None:
+    snapshot_id = resolve_restic_snapshot(backup_target, name)
+    _run_restic(
+        _restic_repository_path(backup_target),
+        "forget",
+        "--prune",
+        snapshot_id,
+    )
+
+
+def create_restic_backup(
+    archive_root: Path,
+    data_dir: Path,
+    backup_target: Path,
+    *,
+    temp_dir: Path | None = None,
+    max_backups: int = 0,
+) -> ResticBackupResult:
+    """Erzeugt einen vollständigen oder inkrementellen, geprüften Restic-Snapshot."""
+    backup_target.mkdir(parents=True, exist_ok=True)
+    _validate_backup_sources(archive_root, data_dir, backup_target=backup_target)
+    resolved_temp = _resolve(temp_dir) if temp_dir is not None else None
+    if resolved_temp == _resolve(data_dir):
+        raise ValueError("Temporärer Ordner darf nicht mit der Datenquelle identisch sein.")
+    if resolved_temp is not None and _is_within(resolved_temp, _resolve(archive_root)):
+        raise ValueError("Temporärer Ordner darf nicht im Archiv liegen.")
+    with _RESTIC_LOCK:
+        log_lines: list[str] = []
+        _checkpoint_sqlite(log_lines, raise_on_error=True)
+        repository = _restic_repository_path(backup_target)
+        repository_was_initialized = (repository / "config").is_file()
+        previous = _prepare_restic_repository(repository, log_lines)
+
+        if repository_was_initialized:
+            log_lines.append(f"{len(previous)} vorhandene Snapshots gefunden; Repository wird geprüft.")
+            _check_restic_repository(repository)
+        if not previous:
+            log_lines.append("Keine Snapshots vorhanden; dieser Lauf erstellt das erste vollständige Backup.")
+
+        args = ["backup", "--json", "--host", "jolia", "--tag", "jolia"]
+        if resolved_temp is not None and _is_within(resolved_temp, _resolve(data_dir)):
+            args.extend(("--exclude", str(temp_dir)))
+        for source in (archive_root, data_dir):
+            if _is_within(_resolve(backup_target), _resolve(source)):
+                args.extend(("--exclude", str(backup_target)))
+        args.extend((str(archive_root), str(data_dir)))
+        completed = _run_restic(repository, *args)
+        summary = _restic_backup_summary(completed.stdout)
+        snapshot_id = summary.get("snapshot_id")
+        if not isinstance(snapshot_id, str) or not is_restic_snapshot_id(snapshot_id):
+            raise RuntimeError("Restic hat keinen gültigen Snapshot für dieses Backup gemeldet.")
+
+        snapshots = _restic_snapshots(repository)
+        if not any(snapshot.get("id") == snapshot_id for snapshot in snapshots):
+            raise RuntimeError(
+                f"Restic meldet den Snapshot {snapshot_id}, dieser ist im Repository aber nicht auffindbar."
+            )
+
+        log_lines.append(f"Snapshot {snapshot_id} wurde geschrieben; vollständige Datenprüfung läuft.")
+        _check_restic_repository(repository, read_data=True)
+
+        if max_backups > 0:
+            _run_restic(
+                repository,
+                "forget",
+                "--keep-last",
+                str(max_backups),
+                "--tag",
+                "jolia",
+                "--prune",
+            )
+
+        files_copied = int(summary.get("total_files_processed", 0))
+        bytes_copied = int(summary.get("total_bytes_processed", 0))
+        log_lines.append(
+            f"{'Inkrementelles' if previous else 'Vollständiges'} Backup geprüft: "
+            f"{files_copied} Dateien, {_fmt_bytes(bytes_copied)} verarbeitet."
+        )
+        return ResticBackupResult(snapshot_id, files_copied, bytes_copied, log_lines)
+
+
+def _validate_backup_sources(
+    archive_root: Path, data_dir: Path, *, backup_target: Path | None = None
+) -> None:
+    for source in (archive_root, data_dir):
+        if not source.is_absolute():
+            raise ValueError(f"Backup-Quelle muss ein absoluter Pfad sein: {source}")
+        if not source.is_dir():
+            raise FileNotFoundError(f"Backup-Quelle fehlt oder ist kein Ordner: {source}")
+    archive_resolved, data_resolved = _resolve(archive_root), _resolve(data_dir)
+    if _is_within(archive_resolved, data_resolved) or _is_within(data_resolved, archive_resolved):
+        raise ValueError("Archiv- und Datenordner dürfen nicht ineinander liegen.")
+    if backup_target is not None:
+        target_resolved = _resolve(backup_target)
+        if target_resolved in {archive_resolved, data_resolved}:
+            raise ValueError("Backup-Ziel darf nicht zugleich ein Backup-Quellordner sein.")
+
+
+def _restic_repository_path(backup_target: Path) -> Path:
+    return backup_target / RESTIC_REPOSITORY_NAME
+
+
+def _prepare_restic_repository(
+    repository: Path, log_lines: list[str]
+) -> list[dict]:
+    if not repository.exists():
+        repository.mkdir(parents=True)
+    if not repository.is_dir():
+        raise RuntimeError(f"Restic-Repository-Pfad ist kein Ordner: {repository}")
+
+    config_file = repository / "config"
+    if not config_file.exists():
+        if any(repository.iterdir()):
+            raise RuntimeError(
+                f"Restic-Repository {repository} enthält Dateien, aber keine gültige "
+                "Repository-Konfiguration. Es wurde nichts verändert."
+            )
+        _run_restic(repository, "init")
+        log_lines.append("Verschlüsseltes Restic-Repository initialisiert.")
+        return []
+
+    return _restic_snapshots(repository)
+
+
+def _restic_snapshots(repository: Path) -> list[dict]:
+    completed = _run_restic(repository, "snapshots", "--json")
+    try:
+        snapshots = json.loads(completed.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Restic lieferte eine ungültige Snapshot-Liste.") from exc
+    if not isinstance(snapshots, list):
+        raise RuntimeError("Restic lieferte eine unerwartete Snapshot-Liste.")
+    return [snapshot for snapshot in snapshots if isinstance(snapshot, dict)]
+
+
+def _restic_backup_summary(output: str) -> dict:
+    summary = None
+    for line in output.splitlines():
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(entry, dict) and entry.get("message_type") == "summary":
+            summary = entry
+    if summary is None:
+        raise RuntimeError("Restic beendete das Backup ohne eine Zusammenfassung.")
+    return summary
+
+
+def _check_restic_repository(
+    repository: Path, *, read_data: bool = False
+) -> None:
+    arguments = ("check", "--read-data") if read_data else ("check",)
+    completed = _run_restic(repository, *arguments)
+    for line in completed.stdout.splitlines():
+        try:
+            result = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(result, dict) or result.get("message_type") != "summary":
+            continue
+        if result.get("num_errors", 0) or result.get("broken_packs"):
+            raise RuntimeError(f"Restic meldet Integritätsfehler: {result}")
+
+
+def _parse_snapshot_time(value: str) -> datetime:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError as exc:
+        raise RuntimeError(f"Ungültiger Zeitstempel in Restic-Snapshot: {value}") from exc
+
+
+def _run_restic(repository: Path, *arguments: str) -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    env["RESTIC_PASSWORD"] = RESTIC_PASSWORD
+    try:
+        completed = subprocess.run(
+            ["restic", "-r", str(repository), *arguments],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("Restic ist nicht installiert oder im PATH nicht verfügbar.") from exc
+    if completed.returncode:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(f"Restic-Befehl fehlgeschlagen: {detail}")
+    return completed
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +542,7 @@ def _next_backup_path(backup_target: Path) -> Path:
     return candidate
 
 
-def _checkpoint_sqlite(log_lines: list[str]) -> None:
+def _checkpoint_sqlite(log_lines: list[str], *, raise_on_error: bool = False) -> None:
     """Schreibt offene WAL-Transaktionen in die Haupt-DB, damit das Backup konsistent ist."""
     try:
         from app.db.database import get_engine
@@ -297,8 +551,13 @@ def _checkpoint_sqlite(log_lines: list[str]) -> None:
         if engine is None:
             return
         with engine.connect() as conn:
-            conn.exec_driver_sql("PRAGMA wal_checkpoint(TRUNCATE)")
+            result = conn.exec_driver_sql("PRAGMA wal_checkpoint(TRUNCATE)")
+            status = result.fetchone()
+            if raise_on_error and status and status[0] != 0:
+                raise RuntimeError(f"SQLite-WAL-Checkpoint meldet BUSY ({status[0]}).")
     except Exception as exc:  # pragma: no cover - reiner Best-Effort-Schritt
+        if raise_on_error:
+            raise RuntimeError(f"SQLite-WAL-Checkpoint fehlgeschlagen: {exc}") from exc
         log_lines.append(f"Hinweis: WAL-Checkpoint fehlgeschlagen ({exc})")
 
 
@@ -374,6 +633,120 @@ def restore_backup(
     )
     report_progress("Wiederherstellung abgeschlossen", 100)
     return log_lines
+
+
+def restore_restic_snapshot(
+    backup_target: Path,
+    snapshot_id: str,
+    archive_root: Path,
+    data_dir: Path,
+    *,
+    temp_dir: Path | None = None,
+    progress_callback: Callable[[str, int], None] | None = None,
+) -> list[str]:
+    if not _RESTIC_LOCK.acquire(blocking=False):
+        raise RuntimeError("Ein Backup oder eine andere Restic-Wiederherstellung läuft bereits.")
+    try:
+        return _restore_restic_snapshot(
+            backup_target,
+            snapshot_id,
+            archive_root,
+            data_dir,
+            temp_dir=temp_dir,
+            progress_callback=progress_callback,
+        )
+    finally:
+        _RESTIC_LOCK.release()
+
+
+def _restore_restic_snapshot(
+    backup_target: Path,
+    snapshot_id: str,
+    archive_root: Path,
+    data_dir: Path,
+    *,
+    temp_dir: Path | None = None,
+    progress_callback: Callable[[str, int], None] | None = None,
+) -> list[str]:
+    """Stellt einen geprüften Snapshot erst in einen Staging-Ordner wieder her."""
+    _validate_backup_sources(archive_root, data_dir, backup_target=backup_target)
+    repository = _restic_repository_path(backup_target)
+    resolve_restic_snapshot(backup_target, snapshot_id)
+
+    log_lines: list[str] = []
+
+    def report_progress(phase: str, progress: int) -> None:
+        if progress_callback is not None:
+            progress_callback(phase, progress)
+
+    report_progress("Backup-Repository wird vollständig geprüft", 1)
+    _check_restic_repository(repository, read_data=True)
+
+    staging_parent = temp_dir if temp_dir is not None else data_dir / "temp"
+    if staging_parent.is_symlink():
+        raise RuntimeError(f"Temporärer Wiederherstellungsordner darf kein Symlink sein: {staging_parent}")
+    if _is_within(_resolve(staging_parent), _resolve(archive_root)):
+        raise RuntimeError("Temporärer Wiederherstellungsordner darf nicht im Archiv liegen.")
+    staging_parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".jolia-restic-restore-", dir=staging_parent))
+    try:
+        report_progress("Snapshot wird in einen temporären Ordner geladen", 5)
+        _run_restic(repository, "restore", snapshot_id, "--target", str(staging))
+
+        restored_archive = staging.joinpath(*archive_root.parts[1:])
+        restored_data = staging.joinpath(*data_dir.parts[1:])
+        if not restored_archive.is_dir() or not restored_data.is_dir():
+            raise RuntimeError(
+                "Der Snapshot enthält nicht beide erforderlichen Ordner "
+                f"({archive_root} und {data_dir}); aktuelle Daten wurden nicht verändert."
+            )
+
+        report_progress("Datenbankverbindungen werden geschlossen", 80)
+        _release_db_handles(log_lines)
+        report_progress("Vorhandene Daten werden ersetzt", 85)
+        _clear_directory_preserving(archive_root, staging)
+        _clear_directory_preserving(data_dir, staging)
+        _move_directory_contents(restored_archive, archive_root)
+        _move_directory_contents(restored_data, data_dir, skip_names={"temp"})
+
+        log_lines.append(f"Restic-Snapshot {snapshot_id} wurde vollständig wiederhergestellt.")
+        report_progress("Wiederherstellung abgeschlossen", 100)
+        return log_lines
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def _clear_directory_preserving(path: Path, preserved: Path) -> int:
+    """Leert ein Verzeichnis, lässt aber einen darin liegenden Staging-Pfad bestehen."""
+    path.mkdir(parents=True, exist_ok=True)
+    preserved_absolute = preserved.absolute()
+
+    def clear(current: Path) -> int:
+        removed = 0
+        for child in current.iterdir():
+            child_absolute = child.absolute()
+            if child_absolute == preserved_absolute:
+                continue
+            if _is_within(preserved_absolute, child_absolute):
+                removed += clear(child)
+                continue
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+            removed += 1
+        return removed
+
+    return clear(path)
+
+
+def _move_directory_contents(source: Path, destination: Path, *, skip_names: set[str] | None = None) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    skipped = skip_names or set()
+    for child in source.iterdir():
+        if child.name in skipped:
+            continue
+        shutil.move(str(child), str(destination / child.name))
 
 
 def _member_target(name: str, archive_root: Path, data_dir: Path) -> Path | None:

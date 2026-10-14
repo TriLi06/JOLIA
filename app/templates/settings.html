@@ -153,10 +153,10 @@
 
 <article id="backups">
     <h3>💾 Backups</h3>
-    <p><small>Jedes Backup ist eine eigenständige ZIP-Datei mit Zeitstempel
-        (<code>jolia_JJMMTTHHMM_backup.zip</code>) im Backup-Ziel. Vorhandene Backups werden
-        nicht überschrieben; reicht der freie Speicher nicht aus, werden automatisch die
-        ältesten gelöscht (die {{ cfg.backup.keep_min_backups }} neuesten bleiben geschützt).</small></p>
+    <p><small>Restic speichert verschlüsselte, inkrementelle Snapshots im Backup-Ziel.
+        Der erste Snapshot enthält den vollständigen Datenstand; vor jedem weiteren Lauf
+        wird das Repository geprüft und anschließend die Datenintegrität vollständig
+        kontrolliert. Vorhandene ZIP-Backups bleiben weiterhin verfügbar.</small></p>
     <p>
         <button onclick="createBackup(this)">Backup jetzt erstellen</button>
         <small id="backup-space"></small>

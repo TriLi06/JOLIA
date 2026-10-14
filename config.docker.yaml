@@ -36,6 +36,7 @@ models:
   vision_ollama_model: "qwen2.5vl:3b"
   vision_ollama_timeout: 1800.0
   ffmpeg_binary: "ffmpeg"
+  ffprobe_binary: "ffprobe"
   # Audio-/Video-Transkription via openai-whisper (CPU)
   whisper_python_model: "base"
   # CLIP-Bildsuche: lokal gebackenes OpenCLIP-Modell (offline)
@@ -82,12 +83,12 @@ scan:
   keep_page_images_seconds: 0
   default_title_prefix: "Scan"
 
-# Backup: je Lauf eine eigene ZIP-Datei (jolia_JJMMTTHHMM_backup.zip) im paths.backup_target.
+# Backups: verschlüsseltes Restic-Repository im paths.backup_target/restic-repository.
 backup:
-  keep_min_backups: 1        # so viele neueste Backups werden bei Platzmangel nie gelöscht (0 = notfalls alle)
-  max_backups: 0             # harte Obergrenze der Anzahl aufbewahrter Backups (0 = unbegrenzt)
-  space_safety_factor: 1.15  # Sicherheitsaufschlag bei der Platzprüfung
-  compress: true             # false = schneller, dafür größere ZIPs
+  keep_min_backups: 1        # nur für alte ZIP-Backups
+  max_backups: 0             # maximale Zahl aufbewahrter Restic-Snapshots (0 = unbegrenzt)
+  space_safety_factor: 1.15  # nur für alte ZIP-Backups
+  compress: true             # nur für alte ZIP-Backups
   restart_after_restore: true
 
 scheduled_jobs:

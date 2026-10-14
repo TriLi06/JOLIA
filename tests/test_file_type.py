@@ -14,6 +14,12 @@ def test_detect_jpg():
     assert ctype == "images"
 
 
+def test_detect_avif():
+    mime, ctype = detect_file_type(Path("photo.avif"))
+    assert mime == "image/avif"
+    assert ctype == "images"
+
+
 def test_detect_mp3():
     mime, ctype = detect_file_type(Path("song.mp3"))
     assert mime == "audio/mpeg"
@@ -24,6 +30,13 @@ def test_detect_mp4():
     mime, ctype = detect_file_type(Path("video.mp4"))
     assert mime == "video/mp4"
     assert ctype == "video"
+
+
+def test_detect_transport_stream_video():
+    for name in ("camera.mts", "camera.m2ts"):
+        mime, ctype = detect_file_type(Path(name))
+        assert mime == "video/mp2t"
+        assert ctype == "video"
 
 
 def test_ignore_temp_files():

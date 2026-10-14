@@ -8,6 +8,7 @@ from app.services.ai_inference_lock import inference_lock
 from app.processors.base_processor import BaseProcessor, ProcessingResult
 from app.services import sidecar_service
 from app.services.chunking_service import split_text
+from app.services.hashing_service import compute_sha256
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ class VideoProcessor(BaseProcessor):
             "file_id": file_record.id,
             "original_filename": file_record.original_filename,
             "sha256": file_record.sha256,
+            "archive_sha256": compute_sha256(file_path),
             "mime_type": file_record.mime_type,
             "content_type": "video",
             "file_size": file_record.file_size,
@@ -87,6 +89,11 @@ class VideoProcessor(BaseProcessor):
             "transcript_sample": transcript,
             "summary": summary,
         }
+        previous_sidecar = sidecar_service.read_json_sidecar(file_path)
+        if previous_sidecar:
+            for key in ("original_mime_type", "video_compression"):
+                if previous_sidecar.get(key):
+                    json_data[key] = previous_sidecar[key]
         json_path = sidecar_service.write_json_sidecar(file_path, json_data)
         md_content = sidecar_service.build_video_md(
             file_record.original_filename, video_meta, summary or transcript

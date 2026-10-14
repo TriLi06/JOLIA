@@ -1,5 +1,5 @@
 # JOLIA Docs – Container-Image (CPU-only, ohne GPU)
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Modell-Caches in ein eigenes Volume legen -> bleiben über Neustarts erhalten
 # und landen NICHT im Backup von /data/store.
@@ -21,6 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tesseract-ocr-deu \
         tesseract-ocr-eng \
         ffmpeg \
+        restic \
+        libavif-bin \
+        libsvtav1enc1 \
         poppler-utils \
         libmediainfo0v5 \
         libsndfile1 \

@@ -24,6 +24,7 @@ _EXT_MAP: dict[str, tuple[str, str]] = {
     ".tif":   ("image/tiff", "images"),
     ".heic":  ("image/heic", "images"),
     ".webp":  ("image/webp", "images"),
+    ".avif":  ("image/avif", "images"),
     ".bmp":   ("image/bmp", "images"),
     # Audio
     ".mp3":   ("audio/mpeg", "audio"),
@@ -39,6 +40,8 @@ _EXT_MAP: dict[str, tuple[str, str]] = {
     ".mov":   ("video/quicktime", "video"),
     ".webm":  ("video/webm", "video"),
     ".m4v":   ("video/mp4", "video"),
+    ".mts":  ("video/mp2t", "video"),
+    ".m2ts": ("video/mp2t", "video"),
 }
 
 # Sidecar-Endungen ignorieren

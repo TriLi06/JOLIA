@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 import threading
 import time
 import uuid
@@ -14,6 +15,12 @@ from app.processors.base_processor import RetryableProcessingError
 from app.services.archive_service import calculate_archive_path, move_to_archive, resolve_archive_path
 from app.services.file_type_service import detect_file_type, is_ignored
 from app.services.hashing_service import compute_sha256
+from app.services.image_compression_service import SUPPORTED_IMAGE_SUFFIXES, compress_image
+from app.services.video_compression_service import (
+    SUPPORTED_VIDEO_SUFFIXES,
+    compress_video,
+    is_already_compressed_video,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +85,7 @@ def _get_processor_registry() -> dict:
             "image/tiff": ImageProcessor(),
             "image/heic": ImageProcessor(),
             "image/webp": ImageProcessor(),
+            "image/avif": ImageProcessor(),
             "image/bmp": ImageProcessor(),
             "audio/mpeg": AudioProcessor(),
             "audio/mp4": AudioProcessor(),
@@ -89,6 +97,7 @@ def _get_processor_registry() -> dict:
             "video/x-matroska": VideoProcessor(),
             "video/x-msvideo": VideoProcessor(),
             "video/quicktime": VideoProcessor(),
+            "video/mp2t": VideoProcessor(),
             "video/webm": VideoProcessor(),
             "__default__": GenericProcessor(),
         }
@@ -115,7 +124,7 @@ def scan_inbox(inbox_path: Path) -> list[Path]:
         except Exception:
             logger.exception("Inbox-Scan: Bündeln der Scan-Seiten fehlgeschlagen.")
 
-    files = [f for f in inbox_path.iterdir() if f.is_file() and not is_ignored(f)]
+    files = [f for f in inbox_path.rglob("*") if f.is_file() and not is_ignored(f)]
     if cfg.scan.bundle_enabled:
         pending = [f for f in files if scan_bundle_service.is_scan_page(f)]
         if pending:
@@ -130,16 +139,6 @@ def import_file(file_path: Path, db: Session, archive_root: Path) -> dict:
     """Importiert eine einzelne Datei: Hash → Duplikat-Check → Archivierung → DB."""
     logger.info("Importiere Datei: %s", file_path.name)
 
-    sha256 = compute_sha256(file_path)
-    existing = repo.get_file_by_sha256(db, sha256)
-    if existing:
-        logger.info("Duplikat erkannt: %s (existiert als %s)", file_path.name, existing.archive_path)
-        return {"status": "duplicate", "file_id": existing.id, "filename": file_path.name}
-
-    mime_type, content_type = detect_file_type(file_path)
-    file_size = file_path.stat().st_size
-    now = datetime.now()
-
     # Reindex-Fall: Datei liegt schon archiviert unter GUID-Namen (voller Rebuild
     # scannt direkt das Archiv) - echten Originalnamen und bereits ermitteltes
     # Erstellungsdatum aus dem noch vorhandenen Sidecar wiederherstellen, statt
@@ -150,6 +149,94 @@ def import_file(file_path: Path, db: Session, archive_root: Path) -> dict:
     recovered_created_at_user_edited = False
     from app.services import sidecar_service
     old_sidecar = sidecar_service.read_json_sidecar(file_path)
+    archive_sha256 = compute_sha256(file_path)
+    sha256 = archive_sha256
+    if old_sidecar and old_sidecar.get("archive_sha256") == archive_sha256:
+        sha256 = old_sidecar.get("sha256") or archive_sha256
+    existing = repo.get_file_by_sha256(db, sha256)
+    if existing:
+        logger.info("Duplikat erkannt: %s (existiert als %s)", file_path.name, existing.archive_path)
+        return {"status": "duplicate", "file_id": existing.id, "filename": file_path.name}
+
+    mime_type, content_type = detect_file_type(file_path)
+    original_mime_type = (
+        old_sidecar.get("original_mime_type", mime_type) if old_sidecar else mime_type
+    )
+    prior_video_compression = (
+        old_sidecar.get("video_compression")
+        if old_sidecar and old_sidecar.get("archive_sha256") == archive_sha256
+        else None
+    )
+    archive_root_resolved = archive_root.resolve()
+    if (
+        not prior_video_compression
+        and file_path.suffix.lower() == ".mp4"
+        and file_path.resolve().is_relative_to(archive_root_resolved)
+    ):
+        from app.config import get_config
+
+        ffprobe_binary = get_config().models.ffprobe_binary
+        if is_already_compressed_video(file_path, ffprobe_binary):
+            prior_video_compression = {
+                "video_codec": "av1",
+                "audio_codec": "aac",
+                "detected": True,
+            }
+    file_size = file_path.stat().st_size
+    archive_source = file_path
+    temp_output_path: Path | None = None
+    if file_path.suffix.lower() in SUPPORTED_IMAGE_SUFFIXES:
+        archive_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            prefix=".jolia-image-",
+            suffix=".avif",
+            dir=archive_root,
+            delete=False,
+        ) as temp_output:
+            temp_output_path = Path(temp_output.name)
+        try:
+            result = compress_image(file_path, temp_output_path)
+            archive_sha256 = compute_sha256(temp_output_path)
+            file_size = result.compressed_size
+            archive_source = temp_output_path
+            mime_type = "image/avif"
+        except Exception:
+            temp_output_path.unlink(missing_ok=True)
+            raise
+    elif (
+        file_path.suffix.lower() in SUPPORTED_VIDEO_SUFFIXES
+        and not prior_video_compression
+    ):
+        from app.config import get_config
+
+        media_config = get_config().models
+        archive_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            prefix=".jolia-video-",
+            suffix=".mp4",
+            dir=archive_root,
+            delete=False,
+        ) as temp_output:
+            temp_output_path = Path(temp_output.name)
+        temp_output_path.unlink()
+        try:
+            result = compress_video(
+                file_path,
+                temp_output_path,
+                profile="ARCHIVE",
+                ffmpeg_binary=media_config.ffmpeg_binary,
+                ffprobe_binary=media_config.ffprobe_binary,
+            )
+            archive_sha256 = compute_sha256(temp_output_path)
+            file_size = result.compressed_size
+            archive_source = temp_output_path
+            mime_type = "video/mp4"
+        except Exception:
+            temp_output_path.unlink(missing_ok=True)
+            raise
+
+    now = datetime.now()
+
     if old_sidecar and old_sidecar.get("original_filename"):
         original_filename = old_sidecar["original_filename"]
     if old_sidecar and old_sidecar.get("created_at"):
@@ -166,8 +253,25 @@ def import_file(file_path: Path, db: Session, archive_root: Path) -> dict:
         folder_date = now
 
     file_id = str(uuid.uuid4())
-    target_path = calculate_archive_path(archive_root, original_filename, content_type, folder_date, file_id)
-    target_path = move_to_archive(file_path, target_path)
+    if mime_type == "image/avif":
+        archive_filename = str(Path(original_filename).with_suffix(".avif"))
+    elif mime_type == "video/mp4" and (
+        archive_source != file_path or prior_video_compression
+    ):
+        archive_filename = str(Path(original_filename).with_suffix(".mp4"))
+    else:
+        archive_filename = original_filename
+    target_path = calculate_archive_path(archive_root, archive_filename, content_type, folder_date, file_id)
+    try:
+        target_path = move_to_archive(archive_source, target_path)
+    finally:
+        if temp_output_path is not None:
+            temp_output_path.unlink(missing_ok=True)
+    if archive_source != file_path:
+        try:
+            file_path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Komprimiertes Original konnte nicht aus der Inbox entfernt werden: %s", file_path)
     # Alte, jetzt verwaiste Sidecars der bereits archivierten Datei entfernen
     # (neue werden bei der Verarbeitung am neuen Pfad frisch erzeugt).
     if old_sidecar is not None:
@@ -178,6 +282,33 @@ def import_file(file_path: Path, db: Session, archive_root: Path) -> dict:
     # Relativ zu archive_root speichern, damit ein Umbenennen/Verschieben des
     # Archiv-Root-Ordners bereits importierte Dateien nicht verwaist.
     relative_archive_path = target_path.relative_to(archive_root)
+    if (mime_type == "image/avif" and (
+        archive_source != file_path or sha256 != archive_sha256
+    )) or (mime_type == "video/mp4" and (
+        archive_source != file_path or prior_video_compression
+    )):
+        sidecar_data = {
+            "original_filename": original_filename,
+            "sha256": sha256,
+            "archive_sha256": archive_sha256,
+            "mime_type": mime_type,
+            "original_mime_type": original_mime_type,
+            "content_type": content_type,
+            "file_size": file_size,
+        }
+        if mime_type == "video/mp4":
+            sidecar_data["video_compression"] = (
+                prior_video_compression
+                or {
+                    "profile": "ARCHIVE",
+                    "video_codec": "libsvtav1",
+                    "audio_codec": "aac",
+                }
+            )
+        sidecar_service.write_json_sidecar(
+            target_path,
+            sidecar_data,
+        )
     file_record = repo.create_file(
         db,
         id=file_id,

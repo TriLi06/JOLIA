@@ -76,7 +76,7 @@ def list_backups():
     return {
         "target": str(target),
         "free_bytes": backup_service.get_free_bytes(target),
-        "backups": [e.as_dict() for e in backup_service.list_backups(target)],
+        "backups": backup_service.list_all_backups(target),
     }
 
 
@@ -84,7 +84,10 @@ def list_backups():
 def delete_backup(name: str):
     cfg = get_config()
     try:
-        backup_service.delete_backup(cfg.paths.backup_target, name)
+        if backup_service.is_restic_snapshot_id(name):
+            backup_service.delete_restic_snapshot(cfg.paths.backup_target, name)
+        else:
+            backup_service.delete_backup(cfg.paths.backup_target, name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except FileNotFoundError as exc:
@@ -96,7 +99,12 @@ def delete_backup(name: str):
 def restore_backup(payload: RestoreRequest, background_tasks: BackgroundTasks):
     cfg = get_config()
     try:
-        zip_path = backup_service.resolve_backup(cfg.paths.backup_target, payload.name)
+        if backup_service.is_restic_snapshot_id(payload.name):
+            backup_service.resolve_restic_snapshot(cfg.paths.backup_target, payload.name)
+            is_restic = True
+        else:
+            backup_service.resolve_backup(cfg.paths.backup_target, payload.name)
+            is_restic = False
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except FileNotFoundError as exc:
@@ -116,7 +124,7 @@ def restore_backup(payload: RestoreRequest, background_tasks: BackgroundTasks):
             }
         )
 
-    background_tasks.add_task(_run_restore_task, zip_path)
+    background_tasks.add_task(_run_restore_task, payload.name, is_restic)
     return {
         "message": f"Wiederherstellung von {payload.name} gestartet.",
         "backup": payload.name,
@@ -135,23 +143,20 @@ def _run_backup_task(backup_id: str) -> None:
     db = _SessionLocal()
     try:
         cfg = get_config()
-        result = backup_service.create_backup(
+        result = backup_service.create_restic_backup(
             cfg.paths.archive_root,
             cfg.paths.data_dir,
             cfg.paths.backup_target,
             temp_dir=cfg.paths.temp_dir,
-            keep_min_backups=cfg.backup.keep_min_backups,
             max_backups=cfg.backup.max_backups,
-            space_safety_factor=cfg.backup.space_safety_factor,
-            compress=cfg.backup.compress,
         )
         repo.finish_backup(
             db,
             backup_id,
             success=True,
             files_copied=result.files_copied,
-            bytes_copied=result.bytes_written,
-            backup_path=str(result.zip_path),
+            bytes_copied=result.bytes_copied,
+            backup_path=f"restic:{result.snapshot_id}",
         )
     except Exception as exc:
         logger.exception("Backup fehlgeschlagen")
@@ -160,17 +165,28 @@ def _run_backup_task(backup_id: str) -> None:
         db.close()
 
 
-def _run_restore_task(zip_path: Path) -> None:
+def _run_restore_task(name: str, is_restic: bool) -> None:
     cfg = get_config()
 
     def update_progress(phase: str, progress: int) -> None:
         _restore_state.update({"phase": phase, "progress": progress})
 
     try:
-        log_lines = backup_service.restore_backup(
-            zip_path, cfg.paths.archive_root, cfg.paths.data_dir,
-            progress_callback=update_progress,
-        )
+        if is_restic:
+            log_lines = backup_service.restore_restic_snapshot(
+                cfg.paths.backup_target,
+                name,
+                cfg.paths.archive_root,
+                cfg.paths.data_dir,
+                temp_dir=cfg.paths.temp_dir,
+                progress_callback=update_progress,
+            )
+        else:
+            zip_path = backup_service.resolve_backup(cfg.paths.backup_target, name)
+            log_lines = backup_service.restore_backup(
+                zip_path, cfg.paths.archive_root, cfg.paths.data_dir,
+                progress_callback=update_progress,
+            )
         _restore_state.update(
             {
                 "status": "restarting" if cfg.backup.restart_after_restore else "done",

@@ -67,23 +67,20 @@ def _run_backup(db: Session, cfg: Config) -> str:
     from app.services import backup_service
     record = repo.create_backup_record(db, str(cfg.paths.backup_target))
     try:
-        result = backup_service.create_backup(
+        result = backup_service.create_restic_backup(
             cfg.paths.archive_root,
             cfg.paths.data_dir,
             cfg.paths.backup_target,
             temp_dir=cfg.paths.temp_dir,
-            keep_min_backups=cfg.backup.keep_min_backups,
             max_backups=cfg.backup.max_backups,
-            space_safety_factor=cfg.backup.space_safety_factor,
-            compress=cfg.backup.compress,
         )
         repo.finish_backup(
             db,
             record.id,
             success=True,
             files_copied=result.files_copied,
-            bytes_copied=result.bytes_written,
-            backup_path=str(result.zip_path),
+            bytes_copied=result.bytes_copied,
+            backup_path=f"restic:{result.snapshot_id}",
         )
         return result.log
     except Exception as exc:

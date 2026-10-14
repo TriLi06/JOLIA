@@ -174,7 +174,13 @@ def download_file(file_id: str, db: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Datei nicht im Archiv vorhanden")
     return FastAPIFileResponse(
         path=str(archive_path),
-        filename=f.original_filename,
+        filename=(
+            str(Path(f.original_filename).with_suffix(".avif"))
+            if f.mime_type == "image/avif"
+            else str(Path(f.original_filename).with_suffix(".mp4"))
+            if f.mime_type == "video/mp4"
+            else f.original_filename
+        ),
         media_type=f.mime_type or "application/octet-stream",
     )
 

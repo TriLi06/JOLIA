@@ -64,6 +64,7 @@ class ModelsConfig(BaseModel):
     whisper_model_path: str = ""
     whisper_python_model: str = "base"            # openai-whisper Modellgröße: tiny | base | small | medium | large
     ffmpeg_binary: str = "ffmpeg"
+    ffprobe_binary: str = "ffprobe"
     # Phase B: OpenCLIP image similarity
     clip_backend: str = "ollama"   # "ollama" (kein HF-Download) | "openclip" (lokal gecachtes Modell)
     clip_model: str = "ViT-B-32"
@@ -150,16 +151,16 @@ class ScanConfig(BaseModel):
 
 
 class BackupConfig(BaseModel):
-    """Backup als ZIP-Datei je Lauf (jolia_JJMMTTHHMM_backup.zip) im paths.backup_target."""
+    """Aufbewahrung und Wiederherstellungsverhalten für Backups."""
 
     # Anzahl der neuesten Backups, die beim Platzmangel NICHT gelöscht werden dürfen.
     # 0 = im Notfall dürfen alle alten Backups gelöscht werden.
     keep_min_backups: int = 1
-    # Harte Obergrenze für die Anzahl aufbewahrter Backups (0 = unbegrenzt).
+    # Harte Obergrenze der Restic-Snapshots (0 = unbegrenzt).
     max_backups: int = 0
-    # Sicherheitsaufschlag auf die geschätzte Backup-Größe bei der Platzprüfung.
+    # Nur noch für die Wiederherstellung alter ZIP-Backups verwendet.
     space_safety_factor: float = 1.15
-    # ZIP-Kompression (Stufe 1). Bei überwiegend PDF/JPG bringt sie wenig – false = schneller.
+    # Nur noch für die Erstellung alter ZIP-Backups verwendet.
     compress: bool = True
     # Nach einer Wiederherstellung den Prozess beenden, damit Docker/systemd neu startet.
     restart_after_restore: bool = True
