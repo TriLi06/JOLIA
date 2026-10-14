@@ -28,7 +28,7 @@ class ProcessingResult:
     sidecar_md_path: str | None = None
     sharpness_score: float | None = None
     perceptual_hash: str | None = None
-    created_at: str | None = None  # inhaltliches Erstellungs-/Belegdatum (EXIF-Aufnahme, Rechnungsdatum) fuer die Timeline
+    created_at: str | None = None  # Inhaltliches Datum (EXIF, Audio-Tags, Belegdatum) fuer die Timeline
 
 
 class BaseProcessor(ABC):

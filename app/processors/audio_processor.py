@@ -13,10 +13,25 @@ logger = logging.getLogger(__name__)
 
 
 class AudioProcessor(BaseProcessor):
-    processor_version = "1.0"
+    processor_version = "1.1"
 
     def process(self, file_path: Path, file_record, config) -> ProcessingResult:
         audio_meta = self._extract_metadata(file_path)
+        from app.services.document_date_service import (
+            extract_audio_date,
+            get_earliest_file_date,
+        )
+
+        audio_created_at = extract_audio_date(audio_meta)
+        if not audio_created_at:
+            try:
+                audio_created_at = get_earliest_file_date(file_path)
+            except OSError as exc:
+                logger.warning(
+                    "Erstellungs-/Änderungsdatum nicht lesbar für %s: %s",
+                    file_record.original_filename,
+                    exc,
+                )
         transcript: str | None = None
         summary: str | None = None
 
@@ -44,6 +59,8 @@ class AudioProcessor(BaseProcessor):
             "SHA256": file_record.sha256,
         }
         metadata.update({k: str(v) for k, v in audio_meta.items()})
+        if audio_created_at:
+            metadata["Aufnahmedatum"] = audio_created_at
 
         json_data = {
             "file_id": file_record.id,
@@ -60,7 +77,7 @@ class AudioProcessor(BaseProcessor):
         }
         json_path = sidecar_service.write_json_sidecar(file_path, json_data)
         md_content = sidecar_service.build_audio_md(
-            file_record.original_filename, audio_meta, summary or transcript
+            file_record.original_filename, metadata, summary or transcript
         )
         md_path = sidecar_service.write_md_sidecar(file_path, md_content)
 
@@ -79,6 +96,7 @@ class AudioProcessor(BaseProcessor):
             success=True,
             chunks=chunks,
             metadata=metadata,
+            created_at=audio_created_at,
             sidecar_json_path=str(json_path),
             sidecar_md_path=str(md_path),
         )
@@ -122,18 +140,14 @@ class AudioProcessor(BaseProcessor):
                 return {}
 
             meta: dict = {}
-            tag_map = {
-                "title": "title",
-                "artist": "artist",
-                "album": "album",
-                "date": "year",
-                "genre": "genre",
-                "tracknumber": "track",
-            }
-            for mutagen_key, our_key in tag_map.items():
-                val = mf.get(mutagen_key)
-                if val:
-                    meta[our_key] = val[0] if isinstance(val, list) else str(val)
+            tag_map = {"date": "year", "tracknumber": "track"}
+            tags = getattr(mf, "tags", None) or {}
+            for mutagen_key, raw_value in tags.items():
+                key = str(mutagen_key).lower()
+                values = raw_value if isinstance(raw_value, (list, tuple)) else [raw_value]
+                value = ", ".join(str(item) for item in values if item is not None)
+                if value:
+                    meta[tag_map.get(key, key)] = value
 
             if hasattr(mf, "info"):
                 info = mf.info

@@ -11,6 +11,30 @@ from app.services.hashing_service import compute_sha256
 from app.services.video_compression_service import VideoCompressionResult
 
 
+def test_audio_metadata_date_takes_precedence_over_existing_import_date():
+    file_record = SimpleNamespace(
+        content_type="audio",
+        created_at="2026-10-14T00:00:00",
+        created_at_user_edited=False,
+    )
+    result = SimpleNamespace(created_at="1979-10-26T00:00:00")
+
+    assert ingestion_service._select_created_at(file_record, result, None) == (
+        "1979-10-26T00:00:00"
+    )
+
+
+def test_user_edited_audio_date_keeps_precedence_over_metadata():
+    file_record = SimpleNamespace(
+        content_type="audio",
+        created_at="1980-01-01",
+        created_at_user_edited=True,
+    )
+    result = SimpleNamespace(created_at="1979-10-26T00:00:00")
+
+    assert ingestion_service._select_created_at(file_record, result, None) == "1980-01-01"
+
+
 def test_scan_inbox_finds_files_in_subdirectories(monkeypatch, tmp_path):
     inbox = tmp_path / "inbox"
     nested = inbox / "nested"

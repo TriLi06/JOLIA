@@ -8,6 +8,7 @@ from app.services.sidecar_service import (
     read_json_sidecar,
     read_md_sidecar,
     build_image_md,
+    build_audio_md,
 )
 
 
@@ -61,3 +62,21 @@ def test_image_markdown_includes_capture_date_from_exif():
     assert "- **DateTimeOriginal:** 2020:05:04 12:30:00" in content
     assert "- **Aufnahmedatum:** 2020:05:04 12:30:00" in content
     assert "- **Make:** Example Camera" in content
+
+
+def test_audio_markdown_includes_all_metadata():
+    content = build_audio_md(
+        "song.mp3",
+        {
+            "title": "Song",
+            "artist": "Artist",
+            "comment": "Additional tag",
+            "Aufnahmedatum": "1984-01-01T00:00:00",
+        },
+        processed_at="2026-10-14T10:00:00",
+    )
+
+    assert "- **title:** Song" in content
+    assert "- **artist:** Artist" in content
+    assert "- **comment:** Additional tag" in content
+    assert "- **Aufnahmedatum:** 1984-01-01T00:00:00" in content

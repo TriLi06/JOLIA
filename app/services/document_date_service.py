@@ -1,6 +1,8 @@
 """Ermittelt das inhaltliche Erstellungs-/Belegdatum einer Datei.
 
 - Bilder: EXIF-Aufnahmedatum (DateTimeOriginal etc.) via parse_exif_datetime().
+- Audio: Veröffentlichungs-/Aufnahmedatum aus Audio-Tags.
+- Audio ohne Datums-Tag: frühestes verfügbares Erstellungs-/Änderungsdatum.
 - Dokumente: aus dem Text extrahiertes, beschriftetes Datum (z.B. Rechnungsdatum)
   via extract_document_date(). Es wird bewusst nur ein *beschriftetes* Datum
   genutzt, um nicht irgendein beliebiges Datum aus dem Fliesstext zu erraten.
@@ -11,8 +13,10 @@ imported_at zurueck, wenn kein Datum gefunden wird.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import date, datetime
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -162,3 +166,64 @@ def parse_exif_datetime(value: str | None) -> str | None:
         except ValueError:
             continue
     return None
+
+
+def extract_audio_date(metadata: dict[str, object]) -> str | None:
+    """Ermittelt das Veröffentlichungs-/Aufnahmedatum aus Audio-Tags."""
+    date_keys = (
+        "originaldate",
+        "recording_date",
+        "date_recorded",
+        "date",
+        "year",
+        "creation_time",
+        "release_date",
+        "releasedate",
+    )
+    for key in date_keys:
+        value = metadata.get(key)
+        values = value if isinstance(value, (list, tuple)) else (value,)
+        for candidate in values:
+            if candidate is None:
+                continue
+            text = str(candidate).strip()
+            if not text:
+                continue
+
+            parsed_datetime = None
+            try:
+                parsed_datetime = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+            if parsed_datetime is not None:
+                if 1800 <= parsed_datetime.year <= _MAX_YEAR:
+                    return parsed_datetime.isoformat()
+                continue
+
+            match = re.fullmatch(r"(\d{4})(?:[-/.](\d{1,2})(?:[-/.](\d{1,2}))?)?", text)
+            if match:
+                year = int(match.group(1))
+                month = int(match.group(2) or 1)
+                day = int(match.group(3) or 1)
+                if 1800 <= year <= _MAX_YEAR:
+                    try:
+                        return datetime(year, month, day).isoformat()
+                    except ValueError:
+                        continue
+    return None
+
+
+def get_earliest_file_date(file_path: Path) -> str:
+    """Gibt das früheste verfügbare Erstellungs- oder Änderungsdatum zurück."""
+    stat = file_path.stat()
+    timestamps = [stat.st_mtime]
+
+    birthtime = getattr(stat, "st_birthtime", None)
+    if birthtime is not None:
+        timestamps.append(birthtime)
+    elif os.name == "nt":
+        creation_time = getattr(stat, "st_ctime", None)
+        if creation_time is not None:
+            timestamps.append(creation_time)
+
+    return datetime.fromtimestamp(min(timestamps)).isoformat()

@@ -20,6 +20,16 @@ _ROOTS_BY_CONTENT_TYPE = {
     "audio": "Audio",
     "video": "Video",
 }
+_ROOT_ALIASES_BY_CONTENT_TYPE = {
+    "images": {"Fotos"},
+}
+
+
+def _allowed_roots_for_content_type(content_type: str | None) -> tuple[str, ...]:
+    content_type = content_type or ""
+    primary_root = _ROOTS_BY_CONTENT_TYPE.get(content_type, "Sonstiges")
+    aliases = sorted(_ROOT_ALIASES_BY_CONTENT_TYPE.get(content_type, set()))
+    return (primary_root, *aliases)
 
 
 def _get_categorization_ollama_service(config):
@@ -269,8 +279,8 @@ def _validate_category_segments(file_record, segments: list[str]) -> str | None:
     """Verhindert unpassende oder ausufernde KI-Pfade vor dem automatischen Anlegen."""
     if not segments or len(segments) > _MAX_DEPTH:
         return "Der KI-Kategoriepfad ist leer oder zu tief verschachtelt."
-    expected_root = _ROOTS_BY_CONTENT_TYPE.get(file_record.content_type or "", "Sonstiges")
-    if segments[0].casefold() != expected_root.casefold():
+    allowed_roots = {root.casefold() for root in _allowed_roots_for_content_type(file_record.content_type)}
+    if segments[0].casefold() not in allowed_roots:
         return f"Die Stammkategorie '{segments[0]}' passt nicht zum Dateityp."
     if any(not segment or segment.casefold() in {"unklar", "unbekannt", "undefined", "null"} for segment in segments):
         return "Der KI-Kategoriepfad enthält ein ungültiges Segment."
@@ -365,8 +375,14 @@ def _suggest_category_result(
 
         ollama = _get_categorization_ollama_service(get_config())
 
-        existing_paths = _build_tree_paths(db)
+        allowed_roots = _allowed_roots_for_content_type(content_type)
+        allowed_roots_normalized = {root.casefold() for root in allowed_roots}
+        existing_paths = [
+            path for path in _build_tree_paths(db)
+            if path.partition(" > ")[0].casefold() in allowed_roots_normalized
+        ]
         existing_str = "\n".join(f"- {p}" for p in existing_paths) if existing_paths else "(noch keine vorhanden)"
+        allowed_roots_str = " oder ".join(f"'{root}'" for root in allowed_roots)
         type_label = {
             "documents": "Dokument", "images": "Bild", "audio": "Audio-Datei", "video": "Video-Datei",
         }.get(content_type or "", "Datei")
@@ -376,8 +392,8 @@ def _suggest_category_result(
             "Ordne diese Datei in eine hierarchische Kategorie-Struktur ein. Du MUSST auch bei "
             "unsicherem Inhalt einen einfachen, nuetzlichen Pfad waehlen. Verwende dafuer immer "
             "diese drei Schritte:\n"
-            "1. Ebene: sichere Stammkategorie aus dem Dateityp: Bilder, Dokumente, Audio, Video "
-            "oder Sonstiges.\n"
+            f"1. Ebene: Die Stammkategorie ist durch den Dateityp fest vorgegeben. "
+            f"Verwende ausschliesslich {allowed_roots_str}; keine andere Stammkategorie.\n"
             "2. Ebene: das Jahr aus Erstellungsdatum, EXIF, Dokumentdatum oder Importdatum. "
             "Wenn kein Jahr vorhanden ist, verwende 'Unbekanntes Jahr'.\n"
             "3. Ebene: genau EIN abstraktes Stichwort aus Zusammenfassung, Sidecar, OCR, Tags "
@@ -387,9 +403,10 @@ def _suggest_category_result(
             "Weitere Ebenen darfst du nur anlegen, wenn sie aus den Daten wirklich sicher "
             "hervorgehen. Erfinde keine Namen, Autoren oder Orte. 'Sonstiges' ist besser als "
             "eine unsichere Detailkategorie. Eine leere oder unklare Antwort ist NICHT erlaubt.\n"
-            "Nutze nach Moeglichkeit einen der folgenden bereits vorhandenen Pfade. Wenn keine "
-            "Kategorie passt, darfst du einen neuen konkreten Pfad vorschlagen; der Code legt "
-            "nur die fehlenden Segmente an.\n"
+            "Nutze nach Moeglichkeit einen der folgenden bereits vorhandenen Pfade. Diese Liste "
+            "enthaelt nur Pfade mit einer fuer diesen Dateityp erlaubten Stammkategorie. Wenn "
+            "keine Kategorie passt, darfst du einen neuen konkreten Pfad mit derselben erlaubten "
+            "Stammkategorie vorschlagen; der Code legt nur die fehlenden Segmente an.\n"
             f"Bereits vorhandene Kategorie-Pfade:\n{existing_str}\n\n"
             f"Dateityp fuer die Einordnung: {type_label}\n"
             f"Vorhandene Tags: {tags_str}\n\n"
@@ -397,7 +414,8 @@ def _suggest_category_result(
             "Antworte in GENAU EINER Zeile im Format:\n"
             "Segment1 > Segment2 > Segment3|<hoch|niedrig>\n"
             "Alternativ als JSON mit action existing, create oder review:\n"
-            '{"action":"create","path":["Dokumente","2026","Neue Fachkategorie"],"confidence":"hoch"}\n'
+            f'{{"action":"create","path":["{allowed_roots[0]}","2026","Neue Fachkategorie"],'
+            '"confidence":"hoch"}\n'
             "Verwende 'hoch', wenn Stammkategorie und Jahr aus den Dateidaten sicher sind, "
             "auch wenn die dritte Ebene 'Sonstiges' lautet. Verwende 'niedrig' nur, wenn selbst "
             "Dateityp und Jahr fehlen. Antworte niemals 'unklar|niedrig', wenn ein Dateityp oder "

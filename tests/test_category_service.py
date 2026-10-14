@@ -38,6 +38,17 @@ def test_validate_category_segments_requires_matching_root():
     assert _validate_category_segments(file_record, ["Bilder", "2026", "Patent"])
 
 
+def test_validate_category_segments_accepts_fotos_root_for_images():
+    file_record = SimpleNamespace(content_type="images", mime_type="image/avif")
+    segments, needs_review = _parse_category_response("Fotos > 2026 > Straße|hoch")
+
+    assert needs_review is False
+    assert _validate_category_segments(file_record, segments) is None
+    assert _validate_category_segments(
+        SimpleNamespace(content_type="documents"), ["Fotos", "2026", "Straße"]
+    )
+
+
 def test_parse_category_low_confidence_is_review():
     assert _parse_category_response("unklar|niedrig") == (None, True)
 
@@ -82,7 +93,7 @@ def test_category_prompt_contains_full_context_and_existing_paths(monkeypatch):
     monkeypatch.setattr("app.config.get_config", lambda: object())
     monkeypatch.setattr(
         "app.services.category_service._build_tree_paths",
-        lambda db: ["Bilder > 2026", "Dokumente > Buecher > Autor"],
+        lambda db: ["Bilder > 2026", "Fotos > 2025", "Dokumente > Buecher > Autor"],
     )
 
     result = _suggest_category_result(
@@ -91,7 +102,10 @@ def test_category_prompt_contains_full_context_and_existing_paths(monkeypatch):
     )
 
     assert result[0] == ["Bilder", "2026", "Garten"]
-    assert "Dokumente > Buecher > Autor" in captured["prompt"]
+    assert "Bilder > 2026" in captured["prompt"]
+    assert "Fotos > 2025" in captured["prompt"]
+    assert "Dokumente > Buecher > Autor" not in captured["prompt"]
+    assert "ausschliesslich 'Bilder' oder 'Fotos'" in captured["prompt"]
     assert "OCR: Rose" in captured["prompt"]
     assert "drei Schritte" in captured["prompt"]
     assert "Sonstiges" in captured["prompt"]

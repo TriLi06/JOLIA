@@ -58,6 +58,14 @@ def _log_step_duration(file_name: str, step: str, started_at: float) -> None:
     )
 
 
+def _select_created_at(file_record, result, category_created_at: str | None) -> str | None:
+    if file_record.created_at_user_edited:
+        return file_record.created_at
+    if file_record.content_type == "audio":
+        return result.created_at or file_record.created_at or category_created_at
+    return category_created_at or file_record.created_at or result.created_at
+
+
 def _get_processor_registry() -> dict:
     global _PROCESSOR_REGISTRY
     if _PROCESSOR_REGISTRY is None:
@@ -673,10 +681,8 @@ def process_file(file_id: str, db: Session) -> None:
         # beschriftetes Belegdatum (z.B. Rechnungsdatum) aus dem Text extrahiert.
         # Bereits beim Import aus einem alten Sidecar wiederhergestelltes Datum
         # hat Vorrang (stabil ueber Reindizierungen hinweg, siehe import_file()).
-        created_at = (
-            file_record.created_at
-            if file_record.created_at_user_edited
-            else locals().get("category_created_at") or file_record.created_at or result.created_at
+        created_at = _select_created_at(
+            file_record, result, locals().get("category_created_at")
         )
         if not created_at and file_record.content_type == "documents":
             try:
@@ -685,10 +691,8 @@ def process_file(file_id: str, db: Session) -> None:
                 created_at = document_date_service.extract_document_date(doc_text)
             except Exception as date_exc:
                 logger.warning("Datumserkennung fehlgeschlagen für %s: %s", file_record.original_filename, date_exc)
-        # Letzter Fallback: Änderungsdatum der Originaldatei (bleibt bei Kopieren/
-        # Verschieben/Reindizieren erhalten, anders als das unzuverlässige
-        # Windows-"Erstellt"-Datum) - deutlich aussagekräftiger als der reine
-        # Importzeitpunkt, besonders bei Audio/Video ohne extrahierbares Datum.
+        # Letzter Fallback: Änderungsdatum der Datei. AudioProcessor ermittelt
+        # zuvor bereits Metadaten- oder Dateisystemdatum für die Timeline.
         if not created_at:
             try:
                 created_at = datetime.fromtimestamp(file_path.stat().st_mtime).isoformat()
